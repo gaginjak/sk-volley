@@ -1,0 +1,11 @@
+body {
+  background: #0f172a;
+}
+
+button {
+  transition: transform 0.15s ease;
+}
+
+button:active {
+  transform: scale(0.98);
+}
