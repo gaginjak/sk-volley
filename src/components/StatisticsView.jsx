@@ -201,7 +201,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   }, [players, visibleGroups, user])
 
   const stats = useMemo(() => {
-    const medicalWarnings = visiblePlayers.map((player) => ({ ...player, status: getMedicalStatus(player.medical_expiry_date || player.medical) })).filter((player) => player.status !== 'ok')
     const currentMonth = getCurrentMonthKey()
     const members = new Map()
 
@@ -232,11 +231,14 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
     const unpaidMemberships = memberEntries.filter((entry) => !pickCurrentMonthMembershipPayment(entry.payments, currentMonth))
 
+    const paidMemberships = memberEntries
+      .map((entry) => ({ entry, payment: pickCurrentMonthMembershipPayment(entry.payments, currentMonth) }))
+      .filter((item) => Boolean(item.payment))
+
     const collectedByGroup = new Map()
     let clubTotal = 0
-    for (const entry of memberEntries) {
-      const payment = pickCurrentMonthMembershipPayment(entry.payments, currentMonth)
-      if (!payment) continue
+    for (const item of paidMemberships) {
+      const { entry, payment } = item
       const amount = toNumber(payment.amount)
       if (!amount) continue
       const key = String(payment.group_id || entry.representative.gid)
@@ -245,16 +247,75 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       clubTotal += amount
     }
 
-    const collectedPerGroup = visibleGroups.map((group) => ({
-      id: group.id,
-      name: group.name,
-      total: Math.round((collectedByGroup.get(String(group.id)) || 0) * 100) / 100,
-    }))
+    const memberByGroup = new Map()
+    const paidByGroup = new Map()
+
+    for (const entry of memberEntries) {
+      for (const gid of entry.groups) {
+        if (!memberByGroup.has(gid)) memberByGroup.set(gid, new Set())
+        memberByGroup.get(gid).add(memberKey(entry.representative))
+      }
+    }
+
+    for (const item of paidMemberships) {
+      const { entry, payment } = item
+      const gid = String(payment.group_id || entry.representative.gid)
+      if (!paidByGroup.has(gid)) paidByGroup.set(gid, new Set())
+      paidByGroup.get(gid).add(memberKey(entry.representative))
+    }
+
+    const collectedPerGroup = visibleGroups.map((group) => {
+      const gid = String(group.id)
+      const totalMembers = memberByGroup.get(gid)?.size || 0
+      const paidMembers = paidByGroup.get(gid)?.size || 0
+      const unpaidMembers = Math.max(totalMembers - paidMembers, 0)
+      return {
+        id: group.id,
+        name: group.name,
+        total: Math.round((collectedByGroup.get(gid) || 0) * 100) / 100,
+        paidMembers,
+        unpaidMembers,
+      }
+    })
+
+    const visibleCoachIds = new Set(visibleGroups.map((group) => String(group.trener_id || '')))
+    const coachUsers = isAdminRole(user?.role)
+      ? users.filter((person) => (person.role === 'trener' || person.role === 'coach' || person.role === 'Coach') && visibleCoachIds.has(String(person.id)))
+      : users.filter((person) => String(person.id) === String(user?.id))
+
+    const coachStats = coachUsers.map((coach) => {
+      const coachGroups = visibleGroups.filter((group) => String(group.trener_id) === String(coach.id))
+      const coachGroupIds = new Set(coachGroups.map((group) => String(group.id)))
+      let coachTotal = 0
+      let paidCount = 0
+      let unpaidCount = 0
+
+      for (const item of collectedPerGroup) {
+        if (coachGroupIds.has(String(item.id))) {
+          coachTotal += item.total
+          paidCount += item.paidMembers
+          unpaidCount += item.unpaidMembers
+        }
+      }
+
+      return {
+        coach,
+        groups: coachGroups,
+        total: Math.round(coachTotal * 100) / 100,
+        paidCount,
+        unpaidCount,
+      }
+    })
+
+    const medicalWarnings = visiblePlayers.map((player) => ({ ...player, status: getMedicalStatus(player.medical_expiry_date || player.medical) })).filter((player) => player.status !== 'ok')
 
     return {
       medicalWarnings,
+      currentMonth,
       unpaidMemberships,
+      paidMembershipsCount: paidMemberships.length,
       collectedPerGroup,
+      coachStats,
       clubTotal: Math.round(clubTotal * 100) / 100,
       groupStats: visibleGroups.map((group) => {
         const groupPlayers = visiblePlayers.filter((player) => String(player.gid) === String(group.id))
@@ -276,27 +337,43 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     <div style={{ padding: 16, display: 'grid', gap: 12 }}>
       <div style={{ color: '#ff9800', fontSize: 22, fontWeight: 800 }}>Statistika</div>
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Upozorenja za medicinske</div>
-        {stats.medicalWarnings.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Nema upozorenja.</div> : stats.medicalWarnings.map((player) => (
-          <button key={player.id} onClick={() => onOpenPlayer?.(player, 'statistics')} style={{ border: 'none', background: 'transparent', color: player.status === 'expired' ? '#fca5a5' : '#fde68a', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{player.name} • {getMedicalLabel(player.status)}</button>
+        <div style={{ fontWeight: 700, color: '#f8fafc' }}>1. Ukupno naplaćene članarine</div>
+        <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>Mesec: {stats.currentMonth}</div>
+        <div style={{ marginTop: 6, color: '#cbd5e1' }}>Plaćeni članovi: <span style={{ color: '#f8fafc', fontWeight: 700 }}>{stats.paidMembershipsCount}</span></div>
+        <div style={{ marginTop: 6, color: '#ff9800', fontSize: 20, fontWeight: 800 }}>{stats.clubTotal.toLocaleString('sr-RS')} RSD</div>
+      </div>
+
+      <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
+        <div style={{ fontWeight: 700, color: '#f8fafc' }}>2. Pregled po grupama</div>
+        {stats.collectedPerGroup.map((item) => {
+          const group = groups.find((candidate) => String(candidate.id) === String(item.id))
+          return (
+            <button key={item.id} onClick={() => onOpenGroup?.(group || { id: item.id, name: item.name }, 'statistics')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, border: '1px solid #334155', borderRadius: 10, background: '#0f172a', color: '#f8fafc', padding: '10px 12px', cursor: 'pointer' }}>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 700 }}>{item.name}</div>
+                <div style={{ color: '#94a3b8', fontSize: 12 }}>Plaćeno: {item.paidMembers} • Neplaćeno: {item.unpaidMembers}</div>
+              </div>
+              <div style={{ color: '#ff9800', fontWeight: 700 }}>{item.total.toLocaleString('sr-RS')} RSD</div>
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
+        <div style={{ fontWeight: 700, color: '#f8fafc' }}>3. Treneri</div>
+        {stats.coachStats.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Nema podataka za trenere.</div> : stats.coachStats.map((item) => (
+          <div key={item.coach.id} style={{ marginTop: 8, border: '1px solid #334155', borderRadius: 10, padding: 10, background: '#0f172a' }}>
+            <button onClick={() => onOpenCoach?.(item.coach)} style={{ border: 'none', background: 'transparent', color: '#f8fafc', fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left' }}>{item.coach.name}</button>
+            <div style={{ color: '#94a3b8', fontSize: 12 }}>{item.coach.username}</div>
+            <div style={{ color: '#cbd5e1', fontSize: 12, marginTop: 4 }}>Grupe: {item.groups.length}</div>
+            <div style={{ color: '#cbd5e1', fontSize: 12 }}>Plaćeno: {item.paidCount} • Neplaćeno: {item.unpaidCount}</div>
+            <div style={{ color: '#ff9800', fontWeight: 700, marginTop: 4 }}>{item.total.toLocaleString('sr-RS')} RSD</div>
+          </div>
         ))}
       </div>
 
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Pregled po grupama</div>
-        {stats.groupStats.map((group) => (
-          <button key={group.id} onClick={() => onOpenGroup?.(group, 'statistics')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #334155', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', borderRadius: 0, background: 'transparent', cursor: 'pointer' }}>
-            <div>
-              <div style={{ color: '#f8fafc', fontWeight: 700 }}>{group.name}</div>
-              <div style={{ color: '#94a3b8', fontSize: 12 }}>{group.playerCount} igrača</div>
-            </div>
-            <div style={{ color: '#ff9800', fontWeight: 700 }}>{group.percent}%</div>
-          </button>
-        ))}
-      </div>
-
-      <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Neplaćena članarina za tekući mesec</div>
+        <div style={{ fontWeight: 700, color: '#f8fafc' }}>4. Neplaćene članarine za tekući mesec</div>
         {stats.unpaidMemberships.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su izmirili članarinu za ovaj mesec.</div> : stats.unpaidMemberships.map((entry) => {
           const groupNames = Array.from(entry.groups)
             .map((groupId) => groups.find((item) => String(item.id) === String(groupId))?.name)
@@ -305,21 +382,12 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
         })}
       </div>
 
-      {isAdminRole(user?.role) ? (
-        <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-          <div style={{ fontWeight: 700, color: '#f8fafc' }}>Naplaćene članarine za tekući mesec (RSD)</div>
-          {stats.collectedPerGroup.map((item) => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, color: '#cbd5e1' }}>
-              <div>{item.name}</div>
-              <div style={{ fontWeight: 700 }}>{item.total.toLocaleString('sr-RS')} RSD</div>
-            </div>
-          ))}
-          <div style={{ borderTop: '1px solid #334155', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', color: '#ff9800', fontWeight: 800 }}>
-            <div>Ukupno klub</div>
-            <div>{stats.clubTotal.toLocaleString('sr-RS')} RSD</div>
-          </div>
-        </div>
-      ) : null}
+      <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
+        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Medicinska upozorenja</div>
+        {stats.medicalWarnings.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Nema upozorenja.</div> : stats.medicalWarnings.map((player) => (
+          <button key={player.id} onClick={() => onOpenPlayer?.(player, 'statistics')} style={{ border: 'none', background: 'transparent', color: player.status === 'expired' ? '#fca5a5' : '#fde68a', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{player.name} • {getMedicalLabel(player.status)}</button>
+        ))}
+      </div>
 
       {isAdminRole(user?.role) ? (
         <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
