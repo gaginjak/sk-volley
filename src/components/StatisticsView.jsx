@@ -37,6 +37,19 @@ function paymentIdentity(payment) {
   ].join('|')
 }
 
+function toTimestamp(value) {
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function pickCurrentMonthMembershipPayment(payments, currentMonth) {
+  const candidates = payments
+    .filter((payment) => payment?.paid && isMembershipPayment(payment) && getPaymentMonth(payment) === currentMonth)
+    .sort((a, b) => toTimestamp(a?.date) - toTimestamp(b?.date))
+  return candidates.length ? candidates[candidates.length - 1] : null
+}
+
 function mergeDistinctPayments(items) {
   const seen = new Set()
   const result = []
@@ -217,25 +230,19 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
     const memberEntries = Array.from(members.values())
 
-    const unpaidMemberships = memberEntries.filter((entry) => {
-      return !entry.payments.some((payment) => {
-        const paymentMonth = getPaymentMonth(payment)
-        return payment?.paid && isMembershipPayment(payment) && paymentMonth === currentMonth
-      })
-    })
+    const unpaidMemberships = memberEntries.filter((entry) => !pickCurrentMonthMembershipPayment(entry.payments, currentMonth))
 
     const collectedByGroup = new Map()
     let clubTotal = 0
     for (const entry of memberEntries) {
-      for (const payment of entry.payments) {
-        if (!payment?.paid || !isMembershipPayment(payment)) continue
-        const amount = toNumber(payment.amount)
-        if (!amount) continue
-        const key = String(payment.group_id || entry.representative.gid)
-        const previous = collectedByGroup.get(key) || 0
-        collectedByGroup.set(key, previous + amount)
-        clubTotal += amount
-      }
+      const payment = pickCurrentMonthMembershipPayment(entry.payments, currentMonth)
+      if (!payment) continue
+      const amount = toNumber(payment.amount)
+      if (!amount) continue
+      const key = String(payment.group_id || entry.representative.gid)
+      const previous = collectedByGroup.get(key) || 0
+      collectedByGroup.set(key, previous + amount)
+      clubTotal += amount
     }
 
     const collectedPerGroup = visibleGroups.map((group) => ({
@@ -300,7 +307,7 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
       {isAdminRole(user?.role) ? (
         <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-          <div style={{ fontWeight: 700, color: '#f8fafc' }}>Ukupno naplaćene članarine (RSD)</div>
+          <div style={{ fontWeight: 700, color: '#f8fafc' }}>Naplaćene članarine za tekući mesec (RSD)</div>
           {stats.collectedPerGroup.map((item) => (
             <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, color: '#cbd5e1' }}>
               <div>{item.name}</div>
