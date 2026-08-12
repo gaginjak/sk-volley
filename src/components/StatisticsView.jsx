@@ -21,6 +21,34 @@ function getPaymentMonth(payment) {
   return ''
 }
 
+function memberKey(player) {
+  return player?.member_id ? `member:${player.member_id}` : `player:${player.id}`
+}
+
+function paymentIdentity(payment) {
+  return [
+    payment?.month_key || '',
+    payment?.date || '',
+    payment?.payment_type || '',
+    payment?.amount || '',
+    payment?.currency || '',
+    payment?.paid ? '1' : '0',
+    payment?.member_id || '',
+  ].join('|')
+}
+
+function mergeDistinctPayments(items) {
+  const seen = new Set()
+  const result = []
+  for (const item of items) {
+    const key = paymentIdentity(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(item)
+  }
+  return result
+}
+
 export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach }) {
   const [groups, setGroups] = useState([])
   const [players, setPlayers] = useState([])
@@ -162,9 +190,35 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   const stats = useMemo(() => {
     const medicalWarnings = visiblePlayers.map((player) => ({ ...player, status: getMedicalStatus(player.medical_expiry_date || player.medical) })).filter((player) => player.status !== 'ok')
     const currentMonth = getCurrentMonthKey()
-    const unpaidMemberships = visiblePlayers.filter((player) => {
-      const payments = parsePayments(player.payments)
-      return !payments.some((payment) => {
+    const members = new Map()
+
+    for (const player of visiblePlayers) {
+      const key = memberKey(player)
+      const existing = members.get(key)
+      const playerPayments = parsePayments(player.payments)
+      const normalized = playerPayments.map((payment) => ({
+        ...payment,
+        month_key: payment?.month_key || (payment?.date ? String(payment.date).slice(0, 7) : null),
+        member_id: payment?.member_id || player?.member_id || player?.id,
+        group_id: payment?.group_id || player?.gid || null,
+      }))
+
+      if (!existing) {
+        members.set(key, {
+          representative: player,
+          groups: new Set([String(player.gid)]),
+          payments: normalized,
+        })
+      } else {
+        existing.groups.add(String(player.gid))
+        existing.payments = mergeDistinctPayments([...existing.payments, ...normalized])
+      }
+    }
+
+    const memberEntries = Array.from(members.values())
+
+    const unpaidMemberships = memberEntries.filter((entry) => {
+      return !entry.payments.some((payment) => {
         const paymentMonth = getPaymentMonth(payment)
         return payment?.paid && isMembershipPayment(payment) && paymentMonth === currentMonth
       })
@@ -172,13 +226,12 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
     const collectedByGroup = new Map()
     let clubTotal = 0
-    for (const player of visiblePlayers) {
-      const playerPayments = parsePayments(player.payments)
-      for (const payment of playerPayments) {
+    for (const entry of memberEntries) {
+      for (const payment of entry.payments) {
         if (!payment?.paid || !isMembershipPayment(payment)) continue
         const amount = toNumber(payment.amount)
         if (!amount) continue
-        const key = String(player.gid)
+        const key = String(payment.group_id || entry.representative.gid)
         const previous = collectedByGroup.get(key) || 0
         collectedByGroup.set(key, previous + amount)
         clubTotal += amount
@@ -237,9 +290,11 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>Neplaćena članarina za tekući mesec</div>
-        {stats.unpaidMemberships.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su izmirili članarinu za ovaj mesec.</div> : stats.unpaidMemberships.map((player) => {
-          const group = groups.find((item) => String(item.id) === String(player.gid))
-          return <button key={player.id} onClick={() => onOpenPlayer?.(player, 'statistics')} style={{ border: 'none', background: 'transparent', color: '#fca5a5', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{player.name} • {group?.name || 'Nepoznata grupa'}</button>
+        {stats.unpaidMemberships.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su izmirili članarinu za ovaj mesec.</div> : stats.unpaidMemberships.map((entry) => {
+          const groupNames = Array.from(entry.groups)
+            .map((groupId) => groups.find((item) => String(item.id) === String(groupId))?.name)
+            .filter(Boolean)
+          return <button key={memberKey(entry.representative)} onClick={() => onOpenPlayer?.(entry.representative, 'statistics')} style={{ border: 'none', background: 'transparent', color: '#fca5a5', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{entry.representative.name} • {groupNames.join(', ') || 'Nepoznata grupa'}</button>
         })}
       </div>
 

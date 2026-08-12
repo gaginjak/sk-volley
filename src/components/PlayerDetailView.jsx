@@ -1,12 +1,41 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
-import { calculateMedicalExpiry, formatDate, getMedicalLabel, getMedicalStatus, parsePayments, stringifyPayments } from '../utils'
+import { calculateMedicalExpiry, formatDate, getCurrentMonthKey, getMedicalLabel, getMedicalStatus, parsePayments, stringifyPayments } from '../utils'
 
 function formatMonthLabel(value) {
   if (!value) return ''
   const [year, month] = value.split('-')
   if (!year || !month) return ''
   return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString('sr-Latn-RS', { month: 'long', year: 'numeric' })
+}
+
+function isMembershipPayment(payment) {
+  const type = String(payment?.payment_type || '').trim().toLowerCase()
+  return type === 'članarina' || type === 'clanarina' || type === 'membership'
+}
+
+function paymentIdentity(payment) {
+  return [
+    payment?.month_key || '',
+    payment?.date || '',
+    payment?.payment_type || '',
+    payment?.amount || '',
+    payment?.currency || '',
+    payment?.paid ? '1' : '0',
+    payment?.member_id || '',
+  ].join('|')
+}
+
+function uniquePayments(items) {
+  const seen = new Set()
+  const result = []
+  for (const item of items) {
+    const key = paymentIdentity(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(item)
+  }
+  return result
 }
 
 export function PlayerDetailView({ player, user, onBack }) {
@@ -22,31 +51,87 @@ export function PlayerDetailView({ player, user, onBack }) {
   useEffect(() => {
     if (!player?.id) return
     setPlayerState(player)
-    loadData()
+    loadData(player)
   }, [player])
 
-  async function loadData() {
+  async function loadData(targetPlayer = player) {
     const [playersRes, attendanceRes] = await Promise.all([
-      supabase.from('players').select('*').eq('id', player.id).single(),
-      supabase.from('attendance').select('*').eq('player_id', player.id).order('training_date'),
+      supabase.from('players').select('*').eq('id', targetPlayer.id).single(),
+      supabase.from('attendance').select('*').eq('player_id', targetPlayer.id).order('training_date'),
     ])
-    const currentPlayer = playersRes.data || player
+    const currentPlayer = playersRes.data || targetPlayer
     setPlayerState(currentPlayer)
-    setPayments(parsePayments(currentPlayer?.payments))
+    const nextPayments = await loadMemberPayments(currentPlayer)
+    setPayments(nextPayments)
     setAttendance(attendanceRes.data || [])
+  }
+
+  async function loadMemberPayments(currentPlayer) {
+    if (!currentPlayer) return []
+    const memberId = currentPlayer.member_id
+    if (!memberId) return parsePayments(currentPlayer.payments)
+
+    const { data, error } = await supabase
+      .from('players')
+      .select('id, payments')
+      .eq('member_id', memberId)
+
+    if (error || !data?.length) {
+      return parsePayments(currentPlayer.payments)
+    }
+
+    const merged = data.flatMap((row) => parsePayments(row.payments))
+    return uniquePayments(merged)
+  }
+
+  async function persistPayments(nextPayments, currentPlayer = playerState || player) {
+    const memberId = currentPlayer?.member_id
+    if (!memberId) {
+      return supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', currentPlayer.id)
+    }
+
+    const { data, error } = await supabase
+      .from('players')
+      .select('id')
+      .eq('member_id', memberId)
+
+    if (error || !data?.length) {
+      return supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', currentPlayer.id)
+    }
+
+    const updates = data.map((row) => supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', row.id))
+    const results = await Promise.all(updates)
+    const failed = results.find((result) => result.error)
+    return failed || { error: null }
   }
 
   async function addPayment(event) {
     event.preventDefault()
-    const next = [...payments, {
-      month: form.date ? formatMonthLabel(form.date.slice(0, 7)) : null,
+    const monthKey = form.date ? form.date.slice(0, 7) : getCurrentMonthKey()
+    const paymentRecord = {
+      month: formatMonthLabel(monthKey),
+      month_key: monthKey,
       date: form.date || null,
       amount: form.amount,
       payment_type: form.payment_type,
       currency: form.currency,
       paid: form.paid,
-    }]
-    const { error } = await supabase.from('players').update({ payments: stringifyPayments(next) }).eq('id', player.id)
+      member_id: playerState?.member_id || playerState?.id || player?.id,
+      group_id: playerState?.gid || player?.gid || null,
+    }
+
+    const normalizedExisting = payments.map((item) => ({
+      ...item,
+      month_key: item?.month_key || (item?.date ? String(item.date).slice(0, 7) : null),
+      member_id: item?.member_id || playerState?.member_id || playerState?.id || player?.id,
+    }))
+
+    const next = isMembershipPayment(paymentRecord)
+      ? normalizedExisting.filter((item) => !(isMembershipPayment(item) && String(item.month_key || '').slice(0, 7) === monthKey))
+      : normalizedExisting
+
+    const merged = uniquePayments([...next, paymentRecord])
+    const { error } = await persistPayments(merged)
     if (!error) {
       setForm({ amount: '', date: '', payment_type: 'Članarina', currency: 'RSD', paid: false })
       setFeedback('Uplata je sačuvana.')
@@ -58,14 +143,14 @@ export function PlayerDetailView({ player, user, onBack }) {
 
   async function togglePayment(index) {
     const next = payments.map((item, i) => i === index ? { ...item, paid: !item.paid } : item)
-    await supabase.from('players').update({ payments: stringifyPayments(next) }).eq('id', player.id)
+    await persistPayments(next)
     loadData()
   }
 
   async function deletePayment(index) {
     if (!window.confirm('Are you sure you want to delete this payment?')) return
     const next = payments.filter((_, itemIndex) => itemIndex !== index)
-    const { error } = await supabase.from('players').update({ payments: stringifyPayments(next) }).eq('id', player.id)
+    const { error } = await persistPayments(next)
     if (!error) {
       setFeedback('Uplata je obrisana.')
       loadData()
