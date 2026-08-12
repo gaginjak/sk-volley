@@ -16,18 +16,16 @@ export function GroupsView({ user, onOpenGroup }) {
   }, [user])
 
   async function loadGroups() {
-    let query = supabase.from('groups').select('*').order('name')
-    if (!isAdminRole(user?.role)) {
-      const allowedIds = parseGroupIds(user?.group_ids)
-      if (allowedIds.length) {
-        query = query.in('id', allowedIds)
-      } else {
-        setGroups([])
-        return
-      }
+    const { data } = await supabase.from('groups').select('*').order('name')
+    const allGroups = data || []
+    if (isAdminRole(user?.role)) {
+      setGroups(allGroups)
+      return
     }
-    const { data } = await query
-    setGroups(data || [])
+
+    const allowedIds = parseGroupIds(user?.group_ids)
+    const visible = allGroups.filter((group) => allowedIds.includes(String(group.id)) || String(group.trener_id) === String(user?.id))
+    setGroups(visible)
   }
 
   async function loadUsers() {
@@ -88,7 +86,7 @@ export function GroupsView({ user, onOpenGroup }) {
 
   const visibleGroups = useMemo(() => {
     const allowedIds = parseGroupIds(user?.group_ids)
-    return groups.filter((group) => isAdminRole(user?.role) || allowedIds.includes(String(group.id)))
+    return groups.filter((group) => isAdminRole(user?.role) || allowedIds.includes(String(group.id)) || String(group.trener_id) === String(user?.id))
   }, [groups, user])
 
   return (

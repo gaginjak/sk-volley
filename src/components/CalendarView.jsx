@@ -163,7 +163,9 @@ export function CalendarView({ user, selectedDate, onDateChange, onOpenTraining 
       setShowForm(false)
       setForm({ gid: '', kind: 'trening', date: '', date_from: '', date_to: '', wdays: [], time: '', note: '', hall: '', uzrast: '', scheduleMode: 'single' })
       setFeedback('Trening je sačuvan.')
-      setSelectedDate(rows[0]?.date || selectedDate)
+      const nextDate = rows[0]?.date || selectedDate || activeDate
+      setActiveDate(nextDate)
+      onDateChange?.(nextDate)
       loadTrainings()
     } else {
       setFeedback('Nije uspelo čuvanje treninga.')
@@ -326,19 +328,21 @@ export function CalendarView({ user, selectedDate, onDateChange, onOpenTraining 
         ) : null}
 
         {selectedDayTrainings.length === 0 ? <div style={{ color: '#94a3b8' }}>Nema zakazanih treninga.</div> : selectedDayTrainings.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onOpenTraining?.(item)}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #334155', width: '100%', background: 'transparent', border: 'none', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}
-          >
-            <div>
-              <div style={{ color: '#f8fafc', fontWeight: 700 }}>{item.gname || 'Trening'}</div>
-              <div style={{ color: '#94a3b8', fontSize: 13 }}>{item.kind} • {formatDate(item.date)} • {item.time || '-'} • {item.note || '-'}</div>
-            </div>
+          <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #334155', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => onOpenTraining?.(item)}
+              style={{ flex: 1, background: 'transparent', border: 'none', color: 'inherit', textAlign: 'left', cursor: 'pointer', padding: 0 }}
+            >
+              <div>
+                <div style={{ color: '#f8fafc', fontWeight: 700 }}>{item.gname || 'Trening'}</div>
+                <div style={{ color: '#94a3b8', fontSize: 13 }}>{item.kind} • {formatDate(item.date)} • {item.time || '-'} • {item.note || '-'}</div>
+              </div>
+            </button>
             <div style={{ display: 'flex', gap: 6 }}>
               {canManageTraining(item) ? <button type="button" onClick={(event) => { event.stopPropagation(); setDeleteTarget(item) }} style={smallButton}>🗑</button> : null}
             </div>
-          </button>
+          </div>
         ))}
       </div>
 

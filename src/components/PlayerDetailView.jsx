@@ -14,7 +14,7 @@ export function PlayerDetailView({ player, user, onBack }) {
   const [playerState, setPlayerState] = useState(player)
   const [payments, setPayments] = useState([])
   const [attendance, setAttendance] = useState([])
-  const [form, setForm] = useState({ amount: '', date: '', payment_type: 'membership', currency: 'RSD', paid: false })
+  const [form, setForm] = useState({ amount: '', date: '', payment_type: 'Članarina', currency: 'RSD', paid: false })
   const [feedback, setFeedback] = useState('')
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({ name: '', dob: '', pos: '', height: '', weight: '', medical_exam_date: '', medical_expiry_date: '', phone: '', parent_phone: '', email: '' })
@@ -48,7 +48,7 @@ export function PlayerDetailView({ player, user, onBack }) {
     }]
     const { error } = await supabase.from('players').update({ payments: stringifyPayments(next) }).eq('id', player.id)
     if (!error) {
-      setForm({ amount: '', date: '', payment_type: 'membership', currency: 'RSD', paid: false })
+      setForm({ amount: '', date: '', payment_type: 'Članarina', currency: 'RSD', paid: false })
       setFeedback('Uplata je sačuvana.')
       loadData()
     } else {
@@ -222,9 +222,9 @@ export function PlayerDetailView({ player, user, onBack }) {
             <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} style={inputStyle} />
             <input value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="Iznos" style={inputStyle} />
             <select value={form.payment_type} onChange={(event) => setForm({ ...form, payment_type: event.target.value })} style={inputStyle}>
-              <option value="membership">Članarina</option>
-              <option value="training">Trening</option>
-              <option value="other">Ostalo</option>
+              <option value="Članarina">Članarina</option>
+              <option value="Kamp">Kamp</option>
+              <option value="Oprema">Oprema</option>
             </select>
             <select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })} style={inputStyle}>
               <option value="RSD">RSD</option>
@@ -238,7 +238,7 @@ export function PlayerDetailView({ player, user, onBack }) {
             <div key={`${payment.month || payment.date}-${index}`} style={{ background: '#111827', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ color: '#f8fafc', fontWeight: 700 }}>{payment.month || payment.date || '-'}</div>
-                <div style={{ color: '#94a3b8', fontSize: 12 }}>{payment.amount || '-'} {payment.currency || 'RSD'} • {payment.payment_type || 'membership'} • {payment.paid ? 'Plaćeno' : 'Neplaćeno'}</div>
+                <div style={{ color: '#94a3b8', fontSize: 12 }}>{payment.amount || '-'} {payment.currency || 'RSD'} • {payment.payment_type || 'Članarina'} • {payment.paid ? 'Plaćeno' : 'Neplaćeno'}</div>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => togglePayment(index)} style={payment.paid ? activeButton : inactiveButton}>{payment.paid ? '✓' : '✕'}</button>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
-import { getMedicalLabel, getMedicalStatus, isAdminRole } from '../utils'
+import { getCurrentMonthKey, getMedicalLabel, getMedicalStatus, isAdminRole, parseGroupIds, parsePayments } from '../utils'
 
 export function StatisticsView({ user }) {
   const [groups, setGroups] = useState([])
@@ -35,19 +35,35 @@ export function StatisticsView({ user }) {
     setCoachSubmitting(true)
     setCoachMessage('')
 
+    const selectedGroupIds = coachForm.group_ids.map((value) => String(value))
+
     const payload = {
       name: coachForm.name.trim(),
       username: coachForm.username.trim(),
       password: coachForm.password,
       role: 'trener',
-      group_ids: JSON.stringify(coachForm.group_ids),
+      group_ids: JSON.stringify(selectedGroupIds),
     }
 
     let error
+    let coachId = editingCoachId
     if (editingCoachId) {
       ;({ error } = await supabase.from('users').update(payload).eq('id', editingCoachId))
     } else {
-      ;({ error } = await supabase.from('users').insert([payload]))
+      const response = await supabase.from('users').insert([payload]).select('id')
+      error = response.error
+      coachId = response.data?.[0]?.id
+    }
+
+    if (!error && coachId) {
+      const previousCoach = editingCoachId ? users.find((person) => String(person.id) === String(editingCoachId)) : null
+      const previousGroupIds = parseGroupIds(previousCoach?.group_ids)
+      const removedGroupIds = previousGroupIds.filter((groupId) => !selectedGroupIds.includes(String(groupId)))
+
+      await Promise.all(selectedGroupIds.map((groupId) => supabase.from('groups').update({ trener_id: coachId }).eq('id', groupId)))
+      await Promise.all(removedGroupIds.map((groupId) => supabase.from('groups').update({ trener_id: null }).eq('id', groupId)))
+
+      await supabase.from('users').update({ group_ids: JSON.stringify(selectedGroupIds) }).eq('id', coachId)
     }
 
     if (error) {
@@ -83,6 +99,9 @@ export function StatisticsView({ user }) {
 
   async function deleteCoach(coachId) {
     if (!window.confirm('Da li želite da obrišete ovog trenera?')) return
+    const coach = users.find((person) => String(person.id) === String(coachId))
+    const groupIds = parseGroupIds(coach?.group_ids)
+    await Promise.all(groupIds.map((groupId) => supabase.from('groups').update({ trener_id: null }).eq('id', groupId)))
     const { error } = await supabase.from('users').delete().eq('id', coachId)
     if (!error) {
       setCoachMessage('Trener je obrisan.')
@@ -103,13 +122,17 @@ export function StatisticsView({ user }) {
 
   const stats = useMemo(() => {
     const medicalWarnings = visiblePlayers.map((player) => ({ ...player, status: getMedicalStatus(player.medical_expiry_date || player.medical) })).filter((player) => player.status !== 'ok')
-    const overdueFees = visiblePlayers.filter((player) => {
-      const payments = player.payments ? JSON.parse(player.payments) : []
-      return payments.some((payment) => !payment.paid)
+    const currentMonth = getCurrentMonthKey()
+    const unpaidMemberships = visiblePlayers.filter((player) => {
+      const payments = parsePayments(player.payments)
+      return !payments.some((payment) => {
+        const paymentMonth = payment?.date ? String(payment.date).slice(0, 7) : String(payment?.month || '').slice(-7)
+        return payment?.paid && payment?.payment_type === 'membership' && paymentMonth === currentMonth
+      })
     })
     return {
       medicalWarnings,
-      overdueFees,
+      unpaidMemberships,
       groupStats: visibleGroups.map((group) => {
         const groupPlayers = visiblePlayers.filter((player) => String(player.gid) === String(group.id))
         const groupAttendance = attendance.filter((item) => String(item.group_id) === String(group.id))
@@ -150,10 +173,11 @@ export function StatisticsView({ user }) {
       </div>
 
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Neplaćene uplate</div>
-        {stats.overdueFees.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Sve uplate su evidentirane.</div> : stats.overdueFees.map((player) => (
-          <div key={player.id} style={{ color: '#fca5a5', marginTop: 8, fontWeight: 700 }}>{player.name}</div>
-        ))}
+        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Neplaćena članarina za tekući mesec</div>
+        {stats.unpaidMemberships.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su izmirili članarinu za ovaj mesec.</div> : stats.unpaidMemberships.map((player) => {
+          const group = groups.find((item) => String(item.id) === String(player.gid))
+          return <div key={player.id} style={{ color: '#fca5a5', marginTop: 8, fontWeight: 700 }}>{player.name} • {group?.name || 'Nepoznata grupa'}</div>
+        })}
       </div>
 
       {isAdminRole(user?.role) ? (
@@ -202,7 +226,7 @@ export function StatisticsView({ user }) {
                   <button onClick={() => deleteCoach(person.id)} style={dangerButton}>Obriši</button>
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Grupe: {person.group_ids || '[]'}</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Grupe: {parseGroupIds(person.group_ids).map((groupId) => groups.find((group) => String(group.id) === String(groupId))?.name).filter(Boolean).join(', ') || 'Nema grupa'}</div>
             </div>
           ))}
         </div>

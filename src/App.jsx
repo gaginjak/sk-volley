@@ -9,7 +9,18 @@ import { LoginScreen } from './components/LoginScreen'
 import { MedicalAlerts } from './components/MedicalAlerts'
 import { PlayerDetailView } from './components/PlayerDetailView'
 import { StatisticsView } from './components/StatisticsView'
+import { supabase } from './supabaseClient'
 import { toLocalDateInput } from './utils'
+
+function createRouteState({ screen, selectedGroup = null, selectedPlayer = null, returnTarget = 'groups', calendarSelectedDate }) {
+  return {
+    screen,
+    selectedGroup,
+    selectedPlayer,
+    returnTarget,
+    calendarSelectedDate,
+  }
+}
 
 function App() {
   const [session, setSession] = useState(() => {
@@ -22,6 +33,32 @@ function App() {
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => toLocalDateInput(new Date()))
   const [returnTarget, setReturnTarget] = useState('groups')
 
+  function applyRouteState(routeState, method = 'replace') {
+    const nextState = createRouteState({
+      screen: routeState.screen || 'calendar',
+      selectedGroup: routeState.selectedGroup || null,
+      selectedPlayer: routeState.selectedPlayer || null,
+      returnTarget: routeState.returnTarget || 'groups',
+      calendarSelectedDate: routeState.calendarSelectedDate || toLocalDateInput(new Date()),
+    })
+
+    setScreen(nextState.screen)
+    setSelectedGroup(nextState.selectedGroup)
+    setSelectedPlayer(nextState.selectedPlayer)
+    setReturnTarget(nextState.returnTarget)
+    setCalendarSelectedDate(nextState.calendarSelectedDate)
+
+    if (method === 'push') {
+      window.history.pushState(nextState, '')
+    } else {
+      window.history.replaceState(nextState, '')
+    }
+  }
+
+  function navigate(nextState) {
+    applyRouteState(nextState, 'push')
+  }
+
   useEffect(() => {
     if (session) {
       localStorage.setItem('sk-volley-session', JSON.stringify(session))
@@ -30,54 +67,82 @@ function App() {
     }
   }, [session])
 
+  useEffect(() => {
+    if (!session?.id) return
+
+    let cancelled = false
+
+    async function refreshSessionUser() {
+      const { data } = await supabase.from('users').select('*').eq('id', session.id).single()
+      if (cancelled || !data) return
+      setSession({
+        id: data.id,
+        name: data.name,
+        role: data.role,
+        username: data.username,
+        group_ids: Array.isArray(data.group_ids) ? data.group_ids : data.group_ids,
+      })
+    }
+
+    refreshSessionUser()
+    return () => {
+      cancelled = true
+    }
+  }, [session?.id])
+
+  useEffect(() => {
+    if (!session) return
+    if (!window.history.state) {
+      applyRouteState(createRouteState({ screen: 'calendar', calendarSelectedDate }), 'replace')
+    }
+
+    const handlePopState = (event) => {
+      const state = event.state || createRouteState({ screen: 'calendar', calendarSelectedDate })
+      applyRouteState(state, 'replace')
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [session])
+
   function handleLogin(user) {
     setSession(user)
-    setScreen('calendar')
+    applyRouteState(createRouteState({ screen: 'calendar', calendarSelectedDate }), 'replace')
   }
 
   function handleLogout() {
     setSession(null)
+    window.history.replaceState(null, '')
     setScreen('calendar')
     setSelectedGroup(null)
     setSelectedPlayer(null)
   }
 
   function handleOpenGroup(group) {
-    setSelectedGroup(group)
-    setReturnTarget('groups')
-    setScreen('group-detail')
+    navigate(createRouteState({ screen: 'group-detail', selectedGroup: group, returnTarget: 'groups', calendarSelectedDate }))
   }
 
   function handleOpenPlayer(player) {
-    setSelectedPlayer(player)
-    setScreen('player-detail')
+    navigate(createRouteState({ screen: 'player-detail', selectedPlayer: player, selectedGroup, returnTarget, calendarSelectedDate }))
   }
 
   function handleOpenTraining(training) {
     if (!training?.gid) return
-    setSelectedGroup({
-      id: training.gid,
-      name: training.gname || 'Grupa',
-      uzrast: training.uzrast || '',
-      pol: '',
-    })
-    setReturnTarget('calendar')
-    setCalendarSelectedDate(training.date || calendarSelectedDate)
-    setScreen('group-detail')
+    navigate(createRouteState({
+      screen: 'group-detail',
+      selectedGroup: {
+        id: training.gid,
+        name: training.gname || 'Grupa',
+        uzrast: training.uzrast || '',
+        pol: '',
+      },
+      returnTarget: 'calendar',
+      calendarSelectedDate: training.date || calendarSelectedDate,
+    }))
   }
 
   function handleBack() {
-    if (selectedPlayer) {
-      setSelectedPlayer(null)
-      setScreen('group-detail')
-      return
-    }
-    if (selectedGroup) {
-      setSelectedGroup(null)
-      setScreen(returnTarget === 'calendar' ? 'calendar' : 'groups')
-      return
-    }
-    setScreen('calendar')
+    window.history.back()
   }
 
   if (!session) {
@@ -93,7 +158,16 @@ function App() {
       {screen === 'group-detail' && selectedGroup ? <GroupDetailView group={selectedGroup} user={session} initialDate={calendarSelectedDate} onBack={handleBack} onOpenPlayer={handleOpenPlayer} /> : null}
       {screen === 'player-detail' && selectedPlayer ? <PlayerDetailView player={selectedPlayer} user={session} onBack={handleBack} /> : null}
       {screen === 'statistics' ? <StatisticsView user={session} /> : null}
-      <BottomNav current={screen} onNavigate={(next) => { setScreen(next); if (next !== 'group-detail') setSelectedGroup(null); if (next !== 'player-detail') setSelectedPlayer(null); if (next === 'calendar') setReturnTarget('groups') }} />
+      <BottomNav current={screen} onNavigate={(next) => {
+        const nextState = createRouteState({
+          screen: next,
+          selectedGroup: null,
+          selectedPlayer: null,
+          returnTarget: next === 'calendar' ? 'groups' : returnTarget,
+          calendarSelectedDate,
+        })
+        navigate(nextState)
+      }} />
     </div>
   )
 }

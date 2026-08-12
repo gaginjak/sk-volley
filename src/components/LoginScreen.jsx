@@ -64,9 +64,6 @@ export function LoginScreen({ onLogin }) {
             {busy ? 'Prijavljivanje...' : 'Prijavi se'}
           </button>
         </form>
-        <div style={{ marginTop: 18, color: '#94a3b8', fontSize: 13 }}>
-          Demo korisnici: admin / admin123 ili dragan / 1234
-        </div>
       </div>
     </div>
   )
