@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { isAdminRole, parseGroupIds } from '../utils'
 
-export function GroupsView({ user, onOpenGroup }) {
+export function GroupsView({ user, onOpenGroup, onOpenPlayer }) {
   const [groups, setGroups] = useState([])
   const [users, setUsers] = useState([])
+  const [memberCounts, setMemberCounts] = useState({})
+  const [search, setSearch] = useState('')
+  const [searchResults, setSearchResults] = useState([])
   const [form, setForm] = useState({ name: '', uzrast: '', pol: '', trener_id: '' })
   const [showForm, setShowForm] = useState(false)
   const [editingGroupId, setEditingGroupId] = useState(null)
@@ -14,6 +17,38 @@ export function GroupsView({ user, onOpenGroup }) {
     loadGroups()
     loadUsers()
   }, [user])
+
+  useEffect(() => {
+    loadMemberCounts()
+    const channel = supabase.channel('groups-view-players')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => {
+        loadMemberCounts()
+        if (search.trim()) {
+          handleSearch(search)
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id, user?.role, user?.group_ids, search])
+
+  useEffect(() => {
+    const query = search.trim()
+    if (!query) {
+      setSearchResults([])
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      handleSearch(query)
+    }, 250)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [search, groups, user])
 
   async function loadGroups() {
     const { data } = await supabase.from('groups').select('*').order('name')
@@ -31,6 +66,29 @@ export function GroupsView({ user, onOpenGroup }) {
   async function loadUsers() {
     const { data } = await supabase.from('users').select('*').order('name')
     setUsers(data || [])
+  }
+
+  async function loadMemberCounts() {
+    const { data } = await supabase.from('players').select('id, gid')
+    const counts = {}
+    for (const player of data || []) {
+      const key = String(player.gid)
+      counts[key] = (counts[key] || 0) + 1
+    }
+    setMemberCounts(counts)
+  }
+
+  async function handleSearch(query) {
+    const { data } = await supabase
+      .from('players')
+      .select('id, name, gid')
+      .ilike('name', `%${query}%`)
+      .order('name')
+      .limit(30)
+
+    const allowedIds = new Set(visibleGroups.map((group) => String(group.id)))
+    const nextResults = (data || []).filter((player) => isAdminRole(user?.role) || allowedIds.has(String(player.gid)))
+    setSearchResults(nextResults)
   }
 
   function resetForm() {
@@ -101,6 +159,40 @@ export function GroupsView({ user, onOpenGroup }) {
 
       {feedback ? <div style={{ color: '#fde68a', fontSize: 13 }}>{feedback}</div> : null}
 
+      <div style={{ background: '#111827', borderRadius: 16, padding: 12, display: 'grid', gap: 8 }}>
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Pretraga igrača (ime/prezime)"
+          style={inputStyle}
+        />
+        {search.trim() ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {searchResults.length === 0 ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Nema rezultata.</div> : searchResults.map((player) => {
+              const group = groups.find((item) => String(item.id) === String(player.gid))
+              return (
+                <button
+                  key={player.id}
+                  onClick={() => onOpenPlayer?.(player, 'groups')}
+                  style={{
+                    border: '1px solid #334155',
+                    background: '#0f172a',
+                    color: '#f8fafc',
+                    borderRadius: 10,
+                    padding: 10,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ fontWeight: 700 }}>{player.name}</div>
+                  <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>{group?.name || 'Nepoznata grupa'}</div>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
+
       {showForm ? (
         <form onSubmit={handleSaveGroup} style={{ display: 'grid', gap: 8, background: '#111827', borderRadius: 16, padding: 12 }}>
           <div style={{ color: '#f8fafc', fontWeight: 700 }}>{editingGroupId ? 'Izmena grupe' : 'Nova grupa'}</div>
@@ -133,7 +225,7 @@ export function GroupsView({ user, onOpenGroup }) {
         <div key={group.id} style={{ border: '1px solid #334155', background: '#111827', borderRadius: 16, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <button onClick={() => onOpenGroup(group)} style={{ border: 'none', background: 'transparent', color: '#f8fafc', textAlign: 'left', cursor: 'pointer', flex: 1, padding: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontWeight: 800 }}>{group.name}</div>
+              <div style={{ fontWeight: 800 }}>{group.name} <span style={{ color: '#ff9800', fontSize: 12 }}>({memberCounts[String(group.id)] || 0})</span></div>
               <div style={{ color: '#ff9800', fontSize: 12 }}>{group.pol || '-'}</div>
             </div>
             <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 4 }}>{group.uzrast || '-'} • Trener: {users.find((u) => u.id === group.trener_id)?.name || 'N/A'}</div>

@@ -2,7 +2,26 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { getCurrentMonthKey, getMedicalLabel, getMedicalStatus, isAdminRole, parseGroupIds, parsePayments } from '../utils'
 
-export function StatisticsView({ user }) {
+function toNumber(value) {
+  if (typeof value === 'number') return value
+  if (typeof value !== 'string') return 0
+  const normalized = value.replace(',', '.').replace(/[^\d.]/g, '')
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function isMembershipPayment(payment) {
+  const type = String(payment?.payment_type || '').trim().toLowerCase()
+  return type === 'članarina' || type === 'clanarina' || type === 'membership'
+}
+
+function getPaymentMonth(payment) {
+  if (payment?.date) return String(payment.date).slice(0, 7)
+  if (payment?.month_key) return String(payment.month_key).slice(0, 7)
+  return ''
+}
+
+export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach }) {
   const [groups, setGroups] = useState([])
   const [players, setPlayers] = useState([])
   const [attendance, setAttendance] = useState([])
@@ -15,7 +34,27 @@ export function StatisticsView({ user }) {
 
   useEffect(() => {
     loadData()
-  }, [])
+
+    const playersChannel = supabase.channel('statistics-players')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, loadData)
+      .subscribe()
+    const groupsChannel = supabase.channel('statistics-groups')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, loadData)
+      .subscribe()
+    const usersChannel = supabase.channel('statistics-users')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, loadData)
+      .subscribe()
+    const attendanceChannel = supabase.channel('statistics-attendance')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, loadData)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(playersChannel)
+      supabase.removeChannel(groupsChannel)
+      supabase.removeChannel(usersChannel)
+      supabase.removeChannel(attendanceChannel)
+    }
+  }, [user?.id, user?.role, user?.group_ids])
 
   async function loadData() {
     const [groupsRes, playersRes, attendanceRes, usersRes] = await Promise.all([
@@ -126,13 +165,37 @@ export function StatisticsView({ user }) {
     const unpaidMemberships = visiblePlayers.filter((player) => {
       const payments = parsePayments(player.payments)
       return !payments.some((payment) => {
-        const paymentMonth = payment?.date ? String(payment.date).slice(0, 7) : String(payment?.month || '').slice(-7)
-        return payment?.paid && payment?.payment_type === 'membership' && paymentMonth === currentMonth
+        const paymentMonth = getPaymentMonth(payment)
+        return payment?.paid && isMembershipPayment(payment) && paymentMonth === currentMonth
       })
     })
+
+    const collectedByGroup = new Map()
+    let clubTotal = 0
+    for (const player of visiblePlayers) {
+      const playerPayments = parsePayments(player.payments)
+      for (const payment of playerPayments) {
+        if (!payment?.paid || !isMembershipPayment(payment)) continue
+        const amount = toNumber(payment.amount)
+        if (!amount) continue
+        const key = String(player.gid)
+        const previous = collectedByGroup.get(key) || 0
+        collectedByGroup.set(key, previous + amount)
+        clubTotal += amount
+      }
+    }
+
+    const collectedPerGroup = visibleGroups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      total: Math.round((collectedByGroup.get(String(group.id)) || 0) * 100) / 100,
+    }))
+
     return {
       medicalWarnings,
       unpaidMemberships,
+      collectedPerGroup,
+      clubTotal: Math.round(clubTotal * 100) / 100,
       groupStats: visibleGroups.map((group) => {
         const groupPlayers = visiblePlayers.filter((player) => String(player.gid) === String(group.id))
         const groupAttendance = attendance.filter((item) => String(item.group_id) === String(group.id))
@@ -155,20 +218,20 @@ export function StatisticsView({ user }) {
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>Upozorenja za medicinske</div>
         {stats.medicalWarnings.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Nema upozorenja.</div> : stats.medicalWarnings.map((player) => (
-          <div key={player.id} style={{ color: player.status === 'expired' ? '#fca5a5' : '#fde68a', marginTop: 8, fontWeight: 700 }}>{player.name} • {getMedicalLabel(player.status)}</div>
+          <button key={player.id} onClick={() => onOpenPlayer?.(player, 'statistics')} style={{ border: 'none', background: 'transparent', color: player.status === 'expired' ? '#fca5a5' : '#fde68a', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{player.name} • {getMedicalLabel(player.status)}</button>
         ))}
       </div>
 
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>Pregled po grupama</div>
         {stats.groupStats.map((group) => (
-          <div key={group.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #334155' }}>
+          <button key={group.id} onClick={() => onOpenGroup?.(group, 'statistics')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #334155', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', borderRadius: 0, background: 'transparent', cursor: 'pointer' }}>
             <div>
               <div style={{ color: '#f8fafc', fontWeight: 700 }}>{group.name}</div>
               <div style={{ color: '#94a3b8', fontSize: 12 }}>{group.playerCount} igrača</div>
             </div>
             <div style={{ color: '#ff9800', fontWeight: 700 }}>{group.percent}%</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -176,9 +239,25 @@ export function StatisticsView({ user }) {
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>Neplaćena članarina za tekući mesec</div>
         {stats.unpaidMemberships.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su izmirili članarinu za ovaj mesec.</div> : stats.unpaidMemberships.map((player) => {
           const group = groups.find((item) => String(item.id) === String(player.gid))
-          return <div key={player.id} style={{ color: '#fca5a5', marginTop: 8, fontWeight: 700 }}>{player.name} • {group?.name || 'Nepoznata grupa'}</div>
+          return <button key={player.id} onClick={() => onOpenPlayer?.(player, 'statistics')} style={{ border: 'none', background: 'transparent', color: '#fca5a5', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{player.name} • {group?.name || 'Nepoznata grupa'}</button>
         })}
       </div>
+
+      {isAdminRole(user?.role) ? (
+        <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
+          <div style={{ fontWeight: 700, color: '#f8fafc' }}>Ukupno naplaćene članarine (RSD)</div>
+          {stats.collectedPerGroup.map((item) => (
+            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, color: '#cbd5e1' }}>
+              <div>{item.name}</div>
+              <div style={{ fontWeight: 700 }}>{item.total.toLocaleString('sr-RS')} RSD</div>
+            </div>
+          ))}
+          <div style={{ borderTop: '1px solid #334155', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', color: '#ff9800', fontWeight: 800 }}>
+            <div>Ukupno klub</div>
+            <div>{stats.clubTotal.toLocaleString('sr-RS')} RSD</div>
+          </div>
+        </div>
+      ) : null}
 
       {isAdminRole(user?.role) ? (
         <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
@@ -214,19 +293,26 @@ export function StatisticsView({ user }) {
 
           {coachMessage ? <div style={{ color: '#fde68a', marginBottom: 8, fontSize: 13 }}>{coachMessage}</div> : null}
 
-          {users.filter((person) => person.role === 'trener').map((person) => (
+          {users.filter((person) => person.role === 'trener' || person.role === 'coach' || person.role === 'Coach').map((person) => (
             <div key={person.id} style={{ padding: '8px 0', color: '#cbd5e1', borderTop: '1px solid #334155' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
+                <button onClick={() => onOpenCoach?.(person)} style={{ border: 'none', background: 'transparent', textAlign: 'left', padding: 0, cursor: 'pointer' }}>
                   <div style={{ fontWeight: 700 }}>{person.name}</div>
                   <div style={{ fontSize: 12, color: '#94a3b8' }}>{person.username}</div>
-                </div>
+                </button>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button onClick={() => startEditCoach(person)} style={smallButton}>Izmeni</button>
                   <button onClick={() => deleteCoach(person.id)} style={dangerButton}>Obriši</button>
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Grupe: {parseGroupIds(person.group_ids).map((groupId) => groups.find((group) => String(group.id) === String(groupId))?.name).filter(Boolean).join(', ') || 'Nema grupa'}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                {parseGroupIds(person.group_ids).map((groupId) => {
+                  const group = groups.find((item) => String(item.id) === String(groupId))
+                  if (!group) return null
+                  return <button key={`${person.id}-${group.id}`} onClick={() => onOpenGroup?.(group, 'statistics')} style={groupChip}>{group.name}</button>
+                })}
+                {!parseGroupIds(person.group_ids).length ? <div style={{ fontSize: 12, color: '#94a3b8' }}>Nema grupa</div> : null}
+              </div>
             </div>
           ))}
         </div>
@@ -268,5 +354,15 @@ const dangerButton = {
   padding: '6px 8px',
   background: '#ef4444',
   color: '#fff',
+  cursor: 'pointer',
+}
+
+const groupChip = {
+  border: '1px solid #334155',
+  borderRadius: 999,
+  padding: '4px 8px',
+  background: '#0f172a',
+  color: '#cbd5e1',
+  fontSize: 12,
   cursor: 'pointer',
 }
