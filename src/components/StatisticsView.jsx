@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
-import { getCurrentMonthKey, getMedicalLabel, getMedicalStatus, isAdminRole, parseGroupIds, parsePayments } from '../utils'
+import { getCurrentMonthKey, getMedicalLabel, getMedicalStatus, getMemberIdentityFromPayment, getMemberIdentityFromPlayer, isAdminRole, parseGroupIds, parsePayments } from '../utils'
 
 function toNumber(value) {
   if (typeof value === 'number') return value
@@ -22,7 +22,7 @@ function getPaymentMonth(payment) {
 }
 
 function memberKey(player) {
-  return player?.member_id ? `member:${player.member_id}` : `player:${player.id}`
+  return getMemberIdentityFromPlayer(player)
 }
 
 function paymentIdentity(payment) {
@@ -211,7 +211,7 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       const normalized = playerPayments.map((payment) => ({
         ...payment,
         month_key: payment?.month_key || (payment?.date ? String(payment.date).slice(0, 7) : null),
-        member_id: payment?.member_id || player?.member_id || player?.id,
+        member_id: getMemberIdentityFromPayment(payment, player),
         group_id: payment?.group_id || player?.gid || null,
       }))
 

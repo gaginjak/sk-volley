@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
-import { calculateMedicalExpiry, formatDate, getCurrentMonthKey, getMedicalLabel, getMedicalStatus, parsePayments, stringifyPayments } from '../utils'
+import { calculateMedicalExpiry, formatDate, getCurrentMonthKey, getMedicalLabel, getMedicalStatus, getMemberIdentityFromPayment, getMemberIdentityFromPlayer, parsePayments, stringifyPayments } from '../utils'
 
 function formatMonthLabel(value) {
   if (!value) return ''
@@ -68,38 +68,38 @@ export function PlayerDetailView({ player, user, onBack }) {
 
   async function loadMemberPayments(currentPlayer) {
     if (!currentPlayer) return []
-    const memberId = currentPlayer.member_id
-    if (!memberId) return parsePayments(currentPlayer.payments)
+      const identity = getMemberIdentityFromPlayer(currentPlayer)
+      const { data, error } = await supabase
+        .from('players')
+        .select('id, gid, name, dob, phone, email, payments')
 
-    const { data, error } = await supabase
-      .from('players')
-      .select('id, payments')
-      .eq('member_id', memberId)
+      if (error || !data?.length) return parsePayments(currentPlayer.payments)
 
-    if (error || !data?.length) {
-      return parsePayments(currentPlayer.payments)
-    }
+      const relatedRows = data.filter((row) => getMemberIdentityFromPlayer(row) === identity)
+      if (!relatedRows.length) return parsePayments(currentPlayer.payments)
 
-    const merged = data.flatMap((row) => parsePayments(row.payments))
+      const merged = relatedRows.flatMap((row) => parsePayments(row.payments).map((payment) => ({
+        ...payment,
+        member_id: getMemberIdentityFromPayment(payment, row),
+        month_key: payment?.month_key || (payment?.date ? String(payment.date).slice(0, 7) : null),
+        group_id: payment?.group_id || row?.gid || null,
+      })))
     return uniquePayments(merged)
   }
 
   async function persistPayments(nextPayments, currentPlayer = playerState || player) {
-    const memberId = currentPlayer?.member_id
-    if (!memberId) {
-      return supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', currentPlayer.id)
-    }
+      const identity = getMemberIdentityFromPlayer(currentPlayer)
+      const { data, error } = await supabase
+        .from('players')
+        .select('id, name, dob, phone, email')
 
-    const { data, error } = await supabase
-      .from('players')
-      .select('id')
-      .eq('member_id', memberId)
+      if (error || !data?.length) {
+        return supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', currentPlayer.id)
+      }
 
-    if (error || !data?.length) {
-      return supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', currentPlayer.id)
-    }
-
-    const updates = data.map((row) => supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', row.id))
+      const relatedRows = data.filter((row) => getMemberIdentityFromPlayer(row) === identity)
+      const rowsToUpdate = relatedRows.length ? relatedRows : [{ id: currentPlayer.id }]
+      const updates = rowsToUpdate.map((row) => supabase.from('players').update({ payments: stringifyPayments(nextPayments) }).eq('id', row.id))
     const results = await Promise.all(updates)
     const failed = results.find((result) => result.error)
     return failed || { error: null }
@@ -116,14 +116,14 @@ export function PlayerDetailView({ player, user, onBack }) {
       payment_type: form.payment_type,
       currency: form.currency,
       paid: form.paid,
-      member_id: playerState?.member_id || playerState?.id || player?.id,
+      member_id: getMemberIdentityFromPlayer(playerState || player),
       group_id: playerState?.gid || player?.gid || null,
     }
 
     const normalizedExisting = payments.map((item) => ({
       ...item,
       month_key: item?.month_key || (item?.date ? String(item.date).slice(0, 7) : null),
-      member_id: item?.member_id || playerState?.member_id || playerState?.id || player?.id,
+      member_id: item?.member_id || getMemberIdentityFromPlayer(playerState || player),
     }))
 
     const next = isMembershipPayment(paymentRecord)

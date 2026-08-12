@@ -113,3 +113,34 @@ export function getCurrentMonthKey(date = new Date()) {
 export function getMonthLabel(date = new Date()) {
   return date.toLocaleDateString('sr-Latn-RS', { month: 'long', year: 'numeric' })
 }
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizePhone(value) {
+  return String(value || '').replace(/[^\d+]/g, '')
+}
+
+export function getMemberIdentityFromPlayer(player) {
+  const memberId = normalizeText(player?.member_id)
+  if (memberId) return `member:${memberId}`
+
+  const email = normalizeText(player?.email)
+  if (email) return `email:${email}`
+
+  const phone = normalizePhone(player?.phone)
+  if (phone) return `phone:${phone}`
+
+  const name = normalizeText(player?.name)
+  const dob = normalizeText(player?.dob)
+  if (name || dob) return `namedob:${name}|${dob}`
+
+  return `player:${player?.id || 'unknown'}`
+}
+
+export function getMemberIdentityFromPayment(payment, player) {
+  const paymentMember = normalizeText(payment?.member_id)
+  if (paymentMember) return paymentMember
+  return getMemberIdentityFromPlayer(player)
+}
