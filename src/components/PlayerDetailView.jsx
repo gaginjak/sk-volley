@@ -191,27 +191,14 @@ export function PlayerDetailView({ player, user, onBack }) {
       pos: editForm.pos || null,
       height: editForm.height || null,
       weight: editForm.weight || null,
-      medical_exam_date: editForm.medical_exam_date || null,
-      medical_expiry_date: editForm.medical_expiry_date || null,
       medical: editForm.medical_expiry_date || null,
       phone: editForm.phone || null,
-      parent_phone: editForm.parent_phone || null,
       email: editForm.email || null,
     }
 
-    const fallbackPayload = {
-      ...payload,
-      medical_exam_date: undefined,
-      medical_expiry_date: undefined,
-      parent_phone: undefined,
-    }
+    const { error } = await supabase.from('players').update(payload).eq('id', player.id)
 
-    let result = await supabase.from('players').update(payload).eq('id', player.id)
-    if (result.error && (result.error.message?.includes('medical_exam_date') || result.error.message?.includes('medical_expiry_date') || result.error.message?.includes('parent_phone'))) {
-      result = await supabase.from('players').update(fallbackPayload).eq('id', player.id)
-    }
-
-    if (!result.error) {
+    if (!error) {
       setEditing(false)
       setFeedback('Podaci igrača su sačuvani.')
       loadData()

@@ -108,51 +108,20 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
       pos: form.pos || null,
       height: form.height || null,
       weight: form.weight || null,
-      medical_exam_date: form.medical_exam_date || null,
-      medical_expiry_date: form.medical_expiry_date || null,
       medical: form.medical_expiry_date || null,
       phone: form.phone || null,
-      parent_phone: form.parent_phone || null,
       email: form.email || null,
     }
 
-    const fallbackPayload = {
-      ...payload,
-      medical_exam_date: undefined,
-      medical_expiry_date: undefined,
-      parent_phone: undefined,
-    }
+    const { error } = await supabase.from('players').insert([payload])
 
-    console.log('Add player payload:', payload)
-    let result = await supabase.from('players').insert([payload])
-    if (result.error) {
-      console.error('Add player insert error:', {
-        message: result.error.message,
-        code: result.error.code,
-        details: result.error.details,
-        hint: result.error.hint,
-      })
-    }
-    if (result.error && (result.error.message?.includes('medical_exam_date') || result.error.message?.includes('medical_expiry_date') || result.error.message?.includes('parent_phone'))) {
-      console.log('Add player fallback payload:', fallbackPayload)
-      result = await supabase.from('players').insert([fallbackPayload])
-      if (result.error) {
-        console.error('Add player fallback insert error:', {
-          message: result.error.message,
-          code: result.error.code,
-          details: result.error.details,
-          hint: result.error.hint,
-        })
-      }
-    }
-
-    if (!result.error) {
+    if (!error) {
       resetForm()
       setFeedback('Igrač je uspešno dodat.')
       await loadData()
     } else {
-      console.error('Add player failed:', result.error)
-      setFeedback(`Nije uspelo čuvanje igrača. (${result.error.message || result.error.code || 'nepoznata greška'})`)
+      console.error('Add player failed:', error)
+      setFeedback(`Nije uspelo čuvanje igrača. (${error.message || error.code || 'nepoznata greška'})`)
     }
   }
 
