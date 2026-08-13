@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../supabaseClient'
 import { calculateMedicalExpiry, formatDate, getMedicalLabel, getMedicalStatus } from '../utils'
 
@@ -22,6 +23,9 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
     email: '',
   })
   const [selectedDate, setSelectedDate] = useState(initialDate || new Date().toISOString().slice(0, 10))
+  const [statsMonth, setStatsMonth] = useState((initialDate || new Date().toISOString().slice(0, 10)).slice(0, 7))
+  const [trainingNote, setTrainingNote] = useState('')
+  const [selectedStatsPlayerId, setSelectedStatsPlayerId] = useState(null)
   const [feedback, setFeedback] = useState('')
 
   useEffect(() => {
@@ -35,8 +39,14 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
   useEffect(() => {
     if (initialDate) {
       setSelectedDate(initialDate)
+      setStatsMonth(initialDate.slice(0, 7))
     }
   }, [initialDate])
+
+  useEffect(() => {
+    const training = trainings.find((item) => item.date === selectedDate)
+    setTrainingNote(training?.note || '')
+  }, [selectedDate, trainings])
 
   async function loadData() {
     if (!group?.id) return
@@ -87,6 +97,10 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
       return
     }
 
+    if (!window.confirm(`Are you sure you want to add ${form.name.trim()} to this group?`)) {
+      return
+    }
+
     const payload = {
       gid: Number(group.id),
       name: form.name.trim(),
@@ -123,8 +137,9 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
     }
   }
 
-  async function handleDeletePlayer(playerId) {
-    if (!window.confirm('Da li želite da obrišete igrača?')) return
+  async function handleDeletePlayer(player) {
+    if (!window.confirm(`Are you sure you want to remove ${player.name} from this group?`)) return
+    const playerId = player.id
     const { error } = await supabase.from('players').delete().eq('id', playerId)
     if (!error) {
       setFeedback('Igrač je obrisan.')
@@ -133,6 +148,12 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
   }
 
   async function updateGroupCoach(trenerId) {
+    const selectedCoach = coachOptions.find((item) => String(item.id) === String(trenerId))
+    if (trenerId) {
+      const confirmed = window.confirm(`Are you sure you want to assign ${selectedCoach?.name || 'this coach'} to ${group?.name || 'this group'}?`)
+      if (!confirmed) return
+    }
+
     const previousCoachId = group?.trener_id || null
     const { error } = await supabase.from('groups').update({ trener_id: trenerId || null }).eq('id', group.id)
     if (!error) {
@@ -167,8 +188,77 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
     loadData()
   }
 
+  async function handleSaveTrainingNote() {
+    const training = trainings.find((item) => item.date === selectedDate)
+    if (training) {
+      const { error } = await supabase.from('trainings').update({ note: trainingNote || null }).eq('id', training.id)
+      if (error) {
+        setFeedback('Nije uspelo čuvanje napomene treninga.')
+        return
+      }
+    } else {
+      const { error } = await supabase.from('trainings').insert([{
+        gid: Number(group.id),
+        gname: group?.name || '',
+        uzrast: group?.uzrast || null,
+        kind: 'trening',
+        date: selectedDate,
+        note: trainingNote || null,
+      }])
+      if (error) {
+        setFeedback('Nije uspelo čuvanje napomene treninga.')
+        return
+      }
+    }
+    setFeedback('Napomena treninga je sačuvana.')
+    await loadData()
+  }
+
+  function getMonthDates(monthKey) {
+    return trainings
+      .filter((item) => String(item.date || '').startsWith(monthKey))
+      .map((item) => item.date)
+      .filter(Boolean)
+      .sort()
+      .filter((date, index, array) => array.indexOf(date) === index)
+  }
+
+  function getPlayerMonthRecord(player, monthKey) {
+    const monthDates = getMonthDates(monthKey)
+    const playerAttendance = attendance.filter((item) => item.player_id === player.id && String(item.training_date || '').startsWith(monthKey))
+    const byDate = new Map(playerAttendance.map((item) => [item.training_date, item.status]))
+    const presentCount = monthDates.filter((date) => byDate.get(date) === 'present').length
+    const absentCount = monthDates.filter((date) => byDate.get(date) === 'absent').length
+    const percentage = monthDates.length ? Math.round((presentCount / monthDates.length) * 100) : 0
+    return { monthDates, byDate, presentCount, absentCount, percentage }
+  }
+
+  function exportMonthlyAttendance() {
+    const monthDates = getMonthDates(statsMonth)
+    const rows = players.map((player) => {
+      const record = getPlayerMonthRecord(player, statsMonth)
+      const row = {
+        Igrac: player.name,
+      }
+      monthDates.forEach((date) => {
+        const status = record.byDate.get(date)
+        row[formatDate(date)] = status === 'present' ? '✓' : status === 'absent' ? '✕' : ''
+      })
+      row['Prisutno'] = record.presentCount
+      row['Odsutno'] = record.absentCount
+      row['Procenat'] = `${record.percentage}%`
+      return row
+    })
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance')
+    const safeGroupName = String(group?.name || 'group').replace(/[^a-zA-Z0-9_-]/g, '_')
+    XLSX.writeFile(workbook, `${safeGroupName}_${statsMonth}_attendance.xlsx`)
+  }
+
   const stats = useMemo(() => {
-    const currentMonth = new Date().toISOString().slice(0, 7)
+    const currentMonth = statsMonth
     return players.map((player) => {
       const playerAttendance = attendance.filter((item) => item.player_id === player.id)
       const month = playerAttendance.filter((item) => item.training_date?.startsWith(currentMonth))
@@ -179,7 +269,10 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
         medicalStatus: getMedicalStatus(player.medical_expiry_date || player.medical),
       }
     }).sort((a, b) => b.attendancePct - a.attendancePct)
-  }, [attendance, players])
+  }, [attendance, players, statsMonth])
+
+  const selectedStatsPlayer = players.find((player) => player.id === selectedStatsPlayerId) || null
+  const selectedStatsRecord = selectedStatsPlayer ? getPlayerMonthRecord(selectedStatsPlayer, statsMonth) : null
 
   return (
     <div style={{ padding: 16, display: 'grid', gap: 14 }}>
@@ -216,6 +309,11 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ color: '#ff9800', fontWeight: 700, fontSize: 14 }}>Datum: {formatDate(selectedDate)}</div>
           <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} style={inputStyle} />
+          <div style={{ display: 'grid', gap: 8 }}>
+            <label style={{ color: '#f8fafc', fontWeight: 700, fontSize: 13 }}>Napomena</label>
+            <input value={trainingNote} onChange={(event) => setTrainingNote(event.target.value)} placeholder="Napomena" style={inputStyle} />
+            <button type="button" onClick={handleSaveTrainingNote} style={buttonStyle}>Sačuvaj napomenu</button>
+          </div>
           {trainings.filter((item) => item.date === selectedDate).length ? (
             <div style={{ color: '#94a3b8', fontSize: 13 }}>{trainings.filter((item) => item.date === selectedDate).length} treninga za ovaj dan</div>
           ) : null}
@@ -274,7 +372,7 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
                       <div style={{ color: '#cbd5e1', fontSize: 11 }}>Pregled: {player.medical_exam_date ? formatDate(player.medical_exam_date) : '-'}</div>
                       <div style={{ color: medicalStatus === 'expired' ? '#fca5a5' : medicalStatus === 'soon' ? '#fde68a' : '#86efac', fontSize: 11 }}>Ističe: {formatDate(medicalExpiry)}</div>
                     </div>
-                    <button onClick={() => handleDeletePlayer(player.id)} style={dangerButton}>Obriši</button>
+                    <button onClick={() => handleDeletePlayer(player)} style={dangerButton}>Obriši</button>
                 </div>
               </div>
             )
@@ -284,15 +382,34 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
 
       {activeTab === 'stats' ? (
         <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input type="month" value={statsMonth} onChange={(event) => setStatsMonth(event.target.value)} style={inputStyle} />
+            <button type="button" onClick={exportMonthlyAttendance} style={buttonStyle}>Export Excel</button>
+          </div>
           {stats.map((player) => (
-            <div key={player.id} style={{ background: '#111827', borderRadius: 12, padding: 12 }}>
+            <button key={player.id} onClick={() => setSelectedStatsPlayerId(player.id)} style={{ background: '#111827', border: '1px solid #334155', borderRadius: 12, padding: 12, width: '100%', textAlign: 'left', cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ color: '#f8fafc', fontWeight: 700 }}>{player.name}</div>
                 <div style={{ color: '#ff9800', fontWeight: 700 }}>{player.attendancePct}%</div>
               </div>
               <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Mesec: {player.monthPct}% • Medicinski: {getMedicalLabel(player.medicalStatus)}</div>
-            </div>
+            </button>
           ))}
+
+          {selectedStatsPlayer && selectedStatsRecord ? (
+            <div style={{ background: '#111827', borderRadius: 12, padding: 12 }}>
+              <div style={{ color: '#f8fafc', fontWeight: 700 }}>{selectedStatsPlayer.name} • {statsMonth}</div>
+              <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Prisutno: {selectedStatsRecord.presentCount} • Odsutno: {selectedStatsRecord.absentCount} • Procenat: {selectedStatsRecord.percentage}%</div>
+              <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+                {selectedStatsRecord.monthDates.map((date) => {
+                  const status = selectedStatsRecord.byDate.get(date)
+                  const label = status === 'present' ? 'present' : status === 'absent' ? 'absent' : 'no record'
+                  return <div key={date} style={{ color: '#cbd5e1', fontSize: 13 }}>{formatDate(date)} • {label}</div>
+                })}
+                {selectedStatsRecord.monthDates.length === 0 ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Nema treninga za izabrani mesec.</div> : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
