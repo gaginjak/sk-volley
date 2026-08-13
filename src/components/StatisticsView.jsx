@@ -86,6 +86,7 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   const [coachMessage, setCoachMessage] = useState('')
   const [editingCoachId, setEditingCoachId] = useState(null)
   const [openUnpaidGroups, setOpenUnpaidGroups] = useState({})
+  const [paymentDetailGroupId, setPaymentDetailGroupId] = useState(null)
   const [exportByGroup, setExportByGroup] = useState({ groupId: '', paymentType: 'Članarina' })
   const [exportClub, setExportClub] = useState({ paymentType: 'Članarina', rangeType: 'current', endDate: new Date().toISOString().slice(0, 10) })
 
@@ -273,11 +274,14 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       }
     }
 
+    const paidMembersByGroup = new Map()
     for (const item of paidMemberships) {
       const { entry, payment } = item
       const gid = String(payment.group_id || entry.representative.gid)
       if (!paidByGroup.has(gid)) paidByGroup.set(gid, new Set())
       paidByGroup.get(gid).add(memberKey(entry.representative))
+      if (!paidMembersByGroup.has(gid)) paidMembersByGroup.set(gid, [])
+      paidMembersByGroup.get(gid).push({ member: entry.representative, payment })
     }
 
     const collectedPerGroup = visibleGroups.map((group) => {
@@ -356,11 +360,24 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       .filter((item) => item.members.length)
       .sort((a, b) => a.name.localeCompare(b.name, 'sr-Latn-RS'))
 
+    const paymentDetailsByGroup = new Map()
+    for (const group of visibleGroups) {
+      const gid = String(group.id)
+      const paidEntries = (paidMembersByGroup.get(gid) || [])
+        .filter((item, index, array) => array.findIndex((other) => memberKey(other.member) === memberKey(item.member)) === index)
+        .sort((a, b) => String(a.member.name || '').localeCompare(String(b.member.name || ''), 'sr-Latn-RS'))
+      const unpaidEntries = (unpaidByGroup.get(gid) || [])
+        .filter((member, index, array) => array.findIndex((item) => memberKey(item) === memberKey(member)) === index)
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'sr-Latn-RS'))
+      paymentDetailsByGroup.set(gid, { paid: paidEntries, unpaid: unpaidEntries })
+    }
+
     return {
       medicalWarnings,
       currentMonth,
       unpaidMemberships,
       unpaidGroups,
+      paymentDetailsByGroup,
       paidMembershipsCount: paidMemberships.length,
       collectedPerGroup,
       coachStats,
@@ -453,6 +470,44 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     XLSX.writeFile(workbook, `club_${selectedType}_payments_${exportClub.rangeType}.xlsx`)
   }
 
+  if (paymentDetailGroupId) {
+    const group = groups.find((candidate) => String(candidate.id) === String(paymentDetailGroupId))
+    const details = stats.paymentDetailsByGroup.get(String(paymentDetailGroupId)) || { paid: [], unpaid: [] }
+    return (
+      <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+        <button type="button" onClick={() => setPaymentDetailGroupId(null)} style={{ justifySelf: 'start', border: '1px solid #334155', borderRadius: 10, background: '#0f172a', color: '#f8fafc', padding: '8px 12px', cursor: 'pointer', fontWeight: 700 }}>← Nazad na statistiku</button>
+        <div style={{ color: '#ff9800', fontSize: 22, fontWeight: 800 }}>{group?.name || 'Grupa'} — Uplate ({stats.currentMonth})</div>
+
+        <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
+          <div style={{ fontWeight: 700, color: '#4ade80' }}>Plaćeno ({details.paid.length})</div>
+          {details.paid.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Nema uplata za ovaj mesec.</div> : (
+            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+              {details.paid.map(({ member, payment }) => (
+                <button key={memberKey(member)} type="button" onClick={() => onOpenPlayer?.(member, 'statistics')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #334155', borderRadius: 10, background: '#0f172a', color: '#4ade80', padding: '10px 12px', cursor: 'pointer', textAlign: 'left' }}>
+                  <span style={{ fontWeight: 700 }}>{member.name}</span>
+                  <span style={{ fontSize: 12 }}>{payment.date || ''} • {toNumber(payment.amount).toLocaleString('sr-RS')} {payment.currency || 'RSD'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
+          <div style={{ fontWeight: 700, color: '#fca5a5' }}>Nije plaćeno ({details.unpaid.length})</div>
+          {details.unpaid.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su platili.</div> : (
+            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+              {details.unpaid.map((member) => (
+                <button key={memberKey(member)} type="button" onClick={() => onOpenPlayer?.(member, 'statistics')} style={{ width: '100%', border: '1px solid #334155', borderRadius: 10, background: '#0f172a', color: '#fca5a5', padding: '10px 12px', cursor: 'pointer', textAlign: 'left', fontWeight: 700 }}>
+                  {member.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ padding: 16, display: 'grid', gap: 12 }}>
       <div style={{ color: '#ff9800', fontSize: 22, fontWeight: 800 }}>Statistika</div>
@@ -466,9 +521,8 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>2. Pregled po grupama</div>
         {stats.collectedPerGroup.map((item) => {
-          const group = groups.find((candidate) => String(candidate.id) === String(item.id))
           return (
-            <button key={item.id} onClick={() => onOpenGroup?.(group || { id: item.id, name: item.name }, 'statistics')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, border: '1px solid #334155', borderRadius: 10, background: '#0f172a', color: '#f8fafc', padding: '10px 12px', cursor: 'pointer' }}>
+            <button key={item.id} onClick={() => setPaymentDetailGroupId(item.id)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, border: '1px solid #334155', borderRadius: 10, background: '#0f172a', color: '#f8fafc', padding: '10px 12px', cursor: 'pointer' }}>
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontWeight: 700 }}>{item.name}</div>
                 <div style={{ color: '#94a3b8', fontSize: 12 }}>Plaćeno: {item.paidMembers} • Neplaćeno: {item.unpaidMembers}</div>
