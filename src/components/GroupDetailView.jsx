@@ -102,7 +102,7 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
     }
 
     const payload = {
-      gid: Number(group.id),
+      gid: group.id,
       name: form.name.trim(),
       dob: form.dob || null,
       pos: form.pos || null,
@@ -123,9 +123,27 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
       parent_phone: undefined,
     }
 
+    console.log('Add player payload:', payload)
     let result = await supabase.from('players').insert([payload])
+    if (result.error) {
+      console.error('Add player insert error:', {
+        message: result.error.message,
+        code: result.error.code,
+        details: result.error.details,
+        hint: result.error.hint,
+      })
+    }
     if (result.error && (result.error.message?.includes('medical_exam_date') || result.error.message?.includes('medical_expiry_date') || result.error.message?.includes('parent_phone'))) {
+      console.log('Add player fallback payload:', fallbackPayload)
       result = await supabase.from('players').insert([fallbackPayload])
+      if (result.error) {
+        console.error('Add player fallback insert error:', {
+          message: result.error.message,
+          code: result.error.code,
+          details: result.error.details,
+          hint: result.error.hint,
+        })
+      }
     }
 
     if (!result.error) {
@@ -133,7 +151,8 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
       setFeedback('Igrač je uspešno dodat.')
       await loadData()
     } else {
-      setFeedback('Nije uspelo čuvanje igrača.')
+      console.error('Add player failed:', result.error)
+      setFeedback(`Nije uspelo čuvanje igrača. (${result.error.message || result.error.code || 'nepoznata greška'})`)
     }
   }
 
