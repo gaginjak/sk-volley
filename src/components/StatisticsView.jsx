@@ -86,8 +86,7 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   const [coachMessage, setCoachMessage] = useState('')
   const [editingCoachId, setEditingCoachId] = useState(null)
   const [paymentDetailGroupId, setPaymentDetailGroupId] = useState(null)
-  const [exportByGroup, setExportByGroup] = useState({ groupId: '', paymentType: 'Članarina' })
-  const [exportClub, setExportClub] = useState({ paymentType: 'Članarina', rangeType: 'current', endDate: new Date().toISOString().slice(0, 10) })
+  const [exportConfig, setExportConfig] = useState({ exportType: 'group', groupId: '', paymentType: 'Članarina', rangeType: 'current', endDate: new Date().toISOString().slice(0, 10) })
 
   useEffect(() => {
     loadData()
@@ -397,69 +396,69 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     }
   }, [attendance, groups, visibleGroups, visiblePlayers])
 
-  function exportPaymentsByGroup() {
-    const group = groups.find((item) => String(item.id) === String(exportByGroup.groupId))
-    if (!group) return
-    const rows = visiblePlayers
-      .filter((player) => String(player.gid) === String(group.id))
-      .flatMap((player) => parsePayments(player.payments).filter((payment) => isPaymentTypeMatch(payment, exportByGroup.paymentType)).map((payment) => ({
-        'Igrac': player.name,
-        'Mesec': payment.month_key || payment.month || '',
-        'Iznos': payment.amount || '',
-        'Valuta': payment.currency || 'RSD',
-        'Datum': payment.date || '',
-        'Status': payment.paid ? 'Plaćeno' : 'Neplaćeno',
-      })))
-
-    const worksheet = XLSX.utils.json_to_sheet(rows)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Payments')
-    const safeGroupName = String(group.name || 'group').replace(/[^a-zA-Z0-9_-]/g, '_')
-    XLSX.writeFile(workbook, `${safeGroupName}_${exportByGroup.paymentType}_payments.xlsx`)
-  }
-
-  function exportPaymentsClub() {
-    const selectedType = exportClub.paymentType
-    const currentMonth = getCurrentMonthKey()
-    const endDate = exportClub.endDate || new Date().toISOString().slice(0, 10)
-    const endMonth = endDate.slice(0, 7)
-
-    const rows = visiblePlayers.flatMap((player) => {
-      const group = groups.find((item) => String(item.id) === String(player.gid))
-      return parsePayments(player.payments)
-        .filter((payment) => isPaymentTypeMatch(payment, selectedType))
-        .filter((payment) => {
-          const month = getPaymentMonth(payment)
-          if (!month) return false
-          if (exportClub.rangeType === 'current') return month === currentMonth
-          return month <= endMonth
-        })
-        .map((payment) => ({
-          'Grupa': group?.name || 'Nepoznata grupa',
+  function handleExport() {
+    if (exportConfig.exportType === 'group') {
+      const group = groups.find((item) => String(item.id) === String(exportConfig.groupId))
+      if (!group) return
+      const rows = visiblePlayers
+        .filter((player) => String(player.gid) === String(group.id))
+        .flatMap((player) => parsePayments(player.payments).filter((payment) => isPaymentTypeMatch(payment, exportConfig.paymentType)).map((payment) => ({
           'Igrac': player.name,
           'Mesec': payment.month_key || payment.month || '',
-          'Iznos': toNumber(payment.amount),
+          'Iznos': payment.amount || '',
           'Valuta': payment.currency || 'RSD',
           'Datum': payment.date || '',
           'Status': payment.paid ? 'Plaćeno' : 'Neplaćeno',
-        }))
-    })
+        })))
 
-    const totalCollected = rows.filter((row) => row['Status'] === 'Plaćeno').reduce((sum, row) => sum + toNumber(row['Iznos']), 0)
-    const summaryRow = {
-      'Grupa': 'UKUPNO',
-      'Igrac': '',
-      'Mesec': '',
-      'Iznos': Math.round(totalCollected * 100) / 100,
-      'Valuta': 'RSD',
-      'Datum': '',
-      'Status': 'Plaćeno',
+      const worksheet = XLSX.utils.json_to_sheet(rows)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Payments')
+      const safeGroupName = String(group.name || 'group').replace(/[^a-zA-Z0-9_-]/g, '_')
+      XLSX.writeFile(workbook, `${safeGroupName}_${exportConfig.paymentType}_payments.xlsx`)
+    } else {
+      const selectedType = exportConfig.paymentType
+      const currentMonth = getCurrentMonthKey()
+      const endDate = exportConfig.endDate || new Date().toISOString().slice(0, 10)
+      const endMonth = endDate.slice(0, 7)
+
+      const rows = visiblePlayers.flatMap((player) => {
+        const group = groups.find((item) => String(item.id) === String(player.gid))
+        return parsePayments(player.payments)
+          .filter((payment) => isPaymentTypeMatch(payment, selectedType))
+          .filter((payment) => {
+            const month = getPaymentMonth(payment)
+            if (!month) return false
+            if (exportConfig.rangeType === 'current') return month === currentMonth
+            return month <= endMonth
+          })
+          .map((payment) => ({
+            'Grupa': group?.name || 'Nepoznata grupa',
+            'Igrac': player.name,
+            'Mesec': payment.month_key || payment.month || '',
+            'Iznos': toNumber(payment.amount),
+            'Valuta': payment.currency || 'RSD',
+            'Datum': payment.date || '',
+            'Status': payment.paid ? 'Plaćeno' : 'Neplaćeno',
+          }))
+      })
+
+      const totalCollected = rows.filter((row) => row['Status'] === 'Plaćeno').reduce((sum, row) => sum + toNumber(row['Iznos']), 0)
+      const summaryRow = {
+        'Grupa': 'UKUPNO',
+        'Igrac': '',
+        'Mesec': '',
+        'Iznos': Math.round(totalCollected * 100) / 100,
+        'Valuta': 'RSD',
+        'Datum': '',
+        'Status': 'Plaćeno',
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet([...rows, summaryRow])
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'ClubPayments')
+      XLSX.writeFile(workbook, `club_${selectedType}_payments_${exportConfig.rangeType}.xlsx`)
     }
-
-    const worksheet = XLSX.utils.json_to_sheet([...rows, summaryRow])
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'ClubPayments')
-    XLSX.writeFile(workbook, `club_${selectedType}_payments_${exportClub.rangeType}.xlsx`)
   }
 
   if (paymentDetailGroupId) {
@@ -547,37 +546,106 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
       {isAdminRole(user?.role) ? (
         <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-          <div style={{ fontWeight: 700, color: '#f8fafc', marginBottom: 10 }}>Export uplata (Admin)</div>
-          <div style={{ display: 'grid', gap: 8, border: '1px solid #334155', borderRadius: 10, padding: 10, background: '#0f172a', marginBottom: 10 }}>
-            <div style={{ color: '#f8fafc', fontWeight: 700, fontSize: 13 }}>Option A — Export by group</div>
-            <select value={exportByGroup.groupId} onChange={(event) => setExportByGroup({ ...exportByGroup, groupId: event.target.value })} style={inputStyle}>
-              <option value="">Izaberite grupu</option>
-              {visibleGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </select>
-            <select value={exportByGroup.paymentType} onChange={(event) => setExportByGroup({ ...exportByGroup, paymentType: event.target.value })} style={inputStyle}>
-              <option value="Članarina">Članarina</option>
-              <option value="Kamp">Kamp</option>
-              <option value="Oprema">Oprema</option>
-            </select>
-            <button type="button" onClick={exportPaymentsByGroup} style={buttonStyle}>Export grupa</button>
+          <div style={{ fontWeight: 700, color: '#f8fafc', marginBottom: 10 }}>Export uplata</div>
+          
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div>
+              <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>Tip exporta</label>
+              <select 
+                value={exportConfig.exportType} 
+                onChange={(event) => setExportConfig({ ...exportConfig, exportType: event.target.value, groupId: '' })}
+                style={inputStyle}
+              >
+                <option value="group">Pojedinačna grupa</option>
+                <option value="club">Ceo klub</option>
+              </select>
+            </div>
+
+            {exportConfig.exportType === 'group' && (
+              <>
+                <div>
+                  <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>Izaberite grupu</label>
+                  <select 
+                    value={exportConfig.groupId} 
+                    onChange={(event) => setExportConfig({ ...exportConfig, groupId: event.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="">Izaberite grupu</option>
+                    {visibleGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>Tip uplate</label>
+                  <select 
+                    value={exportConfig.paymentType} 
+                    onChange={(event) => setExportConfig({ ...exportConfig, paymentType: event.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="Članarina">Članarina</option>
+                    <option value="Kamp">Kamp</option>
+                    <option value="Oprema">Oprema</option>
+                  </select>
+                </div>
+
+                <button 
+                  type="button" 
+                  onClick={handleExport} 
+                  disabled={!exportConfig.groupId}
+                  style={{ ...buttonStyle, opacity: !exportConfig.groupId ? 0.5 : 1, cursor: !exportConfig.groupId ? 'not-allowed' : 'pointer' }}
+                >
+                  Exportuj
+                </button>
+              </>
+            )}
+
+            {exportConfig.exportType === 'club' && (
+              <>
+                <div>
+                  <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>Tip uplate</label>
+                  <select 
+                    value={exportConfig.paymentType} 
+                    onChange={(event) => setExportConfig({ ...exportConfig, paymentType: event.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="Članarina">Članarina</option>
+                    <option value="Kamp">Kamp</option>
+                    <option value="Oprema">Oprema</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>Vremenski raspon</label>
+                  <select 
+                    value={exportConfig.rangeType} 
+                    onChange={(event) => setExportConfig({ ...exportConfig, rangeType: event.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="current">Samo trenutni mesec</option>
+                    <option value="fromStart">Od početka do datuma</option>
+                  </select>
+                </div>
+
+                {exportConfig.rangeType === 'fromStart' && (
+                  <div>
+                    <label style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>Krajnji datum</label>
+                    <input 
+                      type="date" 
+                      value={exportConfig.endDate} 
+                      onChange={(event) => setExportConfig({ ...exportConfig, endDate: event.target.value })}
+                      style={inputStyle}
+                    />
+                  </div>
+                )}
+
+                <button type="button" onClick={handleExport} style={buttonStyle}>
+                  Exportuj
+                </button>
+              </>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gap: 8, border: '1px solid #334155', borderRadius: 10, padding: 10, background: '#0f172a', marginBottom: 12 }}>
-            <div style={{ color: '#f8fafc', fontWeight: 700, fontSize: 13 }}>Option B — Export for entire club</div>
-            <select value={exportClub.paymentType} onChange={(event) => setExportClub({ ...exportClub, paymentType: event.target.value })} style={inputStyle}>
-              <option value="Članarina">Članarina</option>
-              <option value="Kamp">Kamp</option>
-              <option value="Oprema">Oprema</option>
-            </select>
-            <select value={exportClub.rangeType} onChange={(event) => setExportClub({ ...exportClub, rangeType: event.target.value })} style={inputStyle}>
-              <option value="current">Current month only</option>
-              <option value="fromStart">From start to end date</option>
-            </select>
-            {exportClub.rangeType === 'fromStart' ? <input type="date" value={exportClub.endDate} onChange={(event) => setExportClub({ ...exportClub, endDate: event.target.value })} style={inputStyle} /> : null}
-            <button type="button" onClick={exportPaymentsClub} style={buttonStyle}>Export klub</button>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 16 }}>
             <div style={{ fontWeight: 700, color: '#f8fafc' }}>Treneri</div>
             <button onClick={() => { setCoachFormOpen((value) => !value); if (!coachFormOpen) { setEditingCoachId(null); setCoachForm({ name: '', username: '', password: '', group_ids: [] }) } }} style={buttonStyle}>+ Add Coach</button>
           </div>
