@@ -85,7 +85,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   const [coachSubmitting, setCoachSubmitting] = useState(false)
   const [coachMessage, setCoachMessage] = useState('')
   const [editingCoachId, setEditingCoachId] = useState(null)
-  const [openUnpaidGroups, setOpenUnpaidGroups] = useState({})
   const [paymentDetailGroupId, setPaymentDetailGroupId] = useState(null)
   const [exportByGroup, setExportByGroup] = useState({ groupId: '', paymentType: 'Članarina' })
   const [exportClub, setExportClub] = useState({ paymentType: 'Članarina', rangeType: 'current', endDate: new Date().toISOString().slice(0, 10) })
@@ -398,13 +397,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     }
   }, [attendance, groups, visibleGroups, visiblePlayers])
 
-  function toggleUnpaidGroup(groupId) {
-    setOpenUnpaidGroups((current) => ({
-      ...current,
-      [groupId]: !current[groupId],
-    }))
-  }
-
   function exportPaymentsByGroup() {
     const group = groups.find((item) => String(item.id) === String(exportByGroup.groupId))
     if (!group) return
@@ -542,24 +534,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
             <div style={{ color: '#cbd5e1', fontSize: 12, marginTop: 4 }}>Grupe: {item.groups.length}</div>
             <div style={{ color: '#cbd5e1', fontSize: 12 }}>Plaćeno: {item.paidCount} • Neplaćeno: {item.unpaidCount}</div>
             <div style={{ color: '#ff9800', fontWeight: 700, marginTop: 4 }}>{item.total.toLocaleString('sr-RS')} RSD</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 700, color: '#f8fafc' }}>4. Neplaćene članarine za tekući mesec</div>
-        {stats.unpaidGroups.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Svi članovi su izmirili članarinu za ovaj mesec.</div> : stats.unpaidGroups.map((groupItem) => (
-          <div key={groupItem.gid} style={{ marginTop: 8, border: '1px solid #334155', borderRadius: 10, overflow: 'hidden' }}>
-            <button type="button" onClick={() => toggleUnpaidGroup(groupItem.gid)} style={{ width: '100%', border: 'none', background: '#0f172a', color: '#f8fafc', fontWeight: 700, textAlign: 'left', padding: '10px 12px', cursor: 'pointer' }}>
-              {openUnpaidGroups[groupItem.gid] ? '▼' : '▶'} {groupItem.name} ({groupItem.members.length})
-            </button>
-            {openUnpaidGroups[groupItem.gid] ? (
-              <div style={{ display: 'grid', gap: 6, padding: '8px 12px', background: '#111827' }}>
-                {groupItem.members.map((member) => (
-                  <button key={memberKey(member)} type="button" onClick={() => onOpenPlayer?.(member, 'statistics')} style={{ border: 'none', background: 'transparent', color: '#fca5a5', fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{member.name}</button>
-                ))}
-              </div>
-            ) : null}
           </div>
         ))}
       </div>
