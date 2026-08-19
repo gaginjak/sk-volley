@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../supabaseClient'
-import { calculateMedicalExpiry, formatDate, getMedicalLabel, getMedicalStatus } from '../utils'
+import { calculateMedicalExpiry, formatDate, getCurrentMonthKey, getMedicalLabel, getMedicalStatus, parsePayments } from '../utils'
 
 export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer }) {
-  const [activeTab, setActiveTab] = useState('attendance')
+  const [activeTab, setActiveTab] = useState('players')
   const [players, setPlayers] = useState([])
   const [trainings, setTrainings] = useState([])
   const [attendance, setAttendance] = useState([])
@@ -22,9 +22,7 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
     parent_phone: '',
     email: '',
   })
-  const [selectedDate, setSelectedDate] = useState(initialDate || new Date().toISOString().slice(0, 10))
   const [statsMonth, setStatsMonth] = useState((initialDate || new Date().toISOString().slice(0, 10)).slice(0, 7))
-  const [trainingNote, setTrainingNote] = useState('')
   const [selectedStatsPlayerId, setSelectedStatsPlayerId] = useState(null)
   const [feedback, setFeedback] = useState('')
 
@@ -38,15 +36,9 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
 
   useEffect(() => {
     if (initialDate) {
-      setSelectedDate(initialDate)
       setStatsMonth(initialDate.slice(0, 7))
     }
   }, [initialDate])
-
-  useEffect(() => {
-    const training = trainings.find((item) => item.date === selectedDate)
-    setTrainingNote(training?.note || '')
-  }, [selectedDate, trainings])
 
   async function loadData() {
     if (!group?.id) return
@@ -165,43 +157,6 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
     }
   }
 
-  async function handleAttendance(playerId, status) {
-    const payload = { player_id: playerId, training_date: selectedDate, group_id: group.id, status }
-    const existing = attendance.find((item) => item.player_id === playerId && item.training_date === selectedDate)
-    if (existing) {
-      await supabase.from('attendance').update({ status }).eq('id', existing.id)
-    } else {
-      await supabase.from('attendance').insert([payload])
-    }
-    loadData()
-  }
-
-  async function handleSaveTrainingNote() {
-    const training = trainings.find((item) => item.date === selectedDate)
-    if (training) {
-      const { error } = await supabase.from('trainings').update({ note: trainingNote || null }).eq('id', training.id)
-      if (error) {
-        setFeedback('Nije uspelo čuvanje napomene treninga.')
-        return
-      }
-    } else {
-      const { error } = await supabase.from('trainings').insert([{
-        gid: Number(group.id),
-        gname: group?.name || '',
-        uzrast: group?.uzrast || null,
-        kind: 'trening',
-        date: selectedDate,
-        note: trainingNote || null,
-      }])
-      if (error) {
-        setFeedback('Nije uspelo čuvanje napomene treninga.')
-        return
-      }
-    }
-    setFeedback('Napomena treninga je sačuvana.')
-    await loadData()
-  }
-
   function getMonthDates(monthKey) {
     return trainings
       .filter((item) => String(item.date || '').startsWith(monthKey))
@@ -261,6 +216,11 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
 
   const selectedStatsPlayer = players.find((player) => player.id === selectedStatsPlayerId) || null
   const selectedStatsRecord = selectedStatsPlayer ? getPlayerMonthRecord(selectedStatsPlayer, statsMonth) : null
+  const currentMonth = getCurrentMonthKey()
+  const paymentStatuses = players.map((player) => ({
+    ...player,
+    paid: parsePayments(player.payments).some((payment) => payment?.paid && String(payment.month_key || payment.date || '').startsWith(currentMonth)),
+  }))
 
   return (
     <div style={{ padding: 16, display: 'grid', gap: 14 }}>
@@ -286,39 +246,12 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
       ) : null}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {['attendance', 'players', 'stats'].map((tab) => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{ ...pill, ...(activeTab === tab ? activePill : {}) }}>{tab === 'attendance' ? 'Prisustva' : tab === 'players' ? 'Igrači' : 'Statistika'}</button>
+        {['players', 'stats', 'payments'].map((tab) => (
+          <button key={tab} onClick={() => setActiveTab(tab)} style={{ ...pill, ...(activeTab === tab ? activePill : {}) }}>{tab === 'players' ? 'Igrači' : tab === 'stats' ? 'Statistika' : 'Uplate'}</button>
         ))}
       </div>
 
       {feedback ? <div style={{ color: '#fde68a', fontSize: 13 }}>{feedback}</div> : null}
-
-      {activeTab === 'attendance' ? (
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ color: '#ff9800', fontWeight: 700, fontSize: 14 }}>Datum: {formatDate(selectedDate)}</div>
-          <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} style={inputStyle} />
-          <div style={{ display: 'grid', gap: 8 }}>
-            <label style={{ color: '#f8fafc', fontWeight: 700, fontSize: 13 }}>Napomena</label>
-            <input value={trainingNote} onChange={(event) => setTrainingNote(event.target.value)} placeholder="Napomena" style={inputStyle} />
-            <button type="button" onClick={handleSaveTrainingNote} style={buttonStyle}>Sačuvaj napomenu</button>
-          </div>
-          {trainings.filter((item) => item.date === selectedDate).length ? (
-            <div style={{ color: '#94a3b8', fontSize: 13 }}>{trainings.filter((item) => item.date === selectedDate).length} treninga za ovaj dan</div>
-          ) : null}
-          {players.map((player) => {
-            const existing = attendance.find((item) => item.player_id === player.id && item.training_date === selectedDate)
-            return (
-              <div key={player.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111827', borderRadius: 12, padding: 10 }}>
-                <div onClick={() => onOpenPlayer(player)} style={{ color: '#f8fafc', cursor: 'pointer' }}>{player.name}</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => handleAttendance(player.id, 'present')} style={markButton(existing?.status === 'present' ? '#22c55e' : '#1f2937')}>✓</button>
-                  <button onClick={() => handleAttendance(player.id, 'absent')} style={markButton(existing?.status === 'absent' ? '#ef4444' : '#1f2937')}>✕</button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ) : null}
 
       {activeTab === 'players' ? (
         <div style={{ display: 'grid', gap: 10 }}>
@@ -365,6 +298,18 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
               </div>
             )
           })}
+        </div>
+      ) : null}
+
+      {activeTab === 'payments' ? (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ color: '#f8fafc', fontWeight: 700 }}>Uplate za {currentMonth}</div>
+          {paymentStatuses.length === 0 ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Nema igrača u ovoj grupi.</div> : paymentStatuses.map((player) => (
+            <button key={player.id} type="button" onClick={() => onOpenPlayer(player)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111827', border: '1px solid #334155', borderRadius: 12, padding: 12, color: '#f8fafc', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ fontWeight: 700 }}>{player.name}</span>
+              <span style={{ color: player.paid ? '#86efac' : '#fca5a5', fontSize: 13 }}>{player.paid ? 'Plaćeno' : 'Nije plaćeno'}</span>
+            </button>
+          ))}
         </div>
       ) : null}
 
@@ -435,16 +380,6 @@ const activePill = {
   borderColor: '#ff9800',
   color: '#ff9800',
 }
-
-const markButton = (background) => ({
-  border: 'none',
-  width: 36,
-  height: 36,
-  borderRadius: 999,
-  background,
-  color: '#fff',
-  cursor: 'pointer',
-})
 
 const secondaryButton = {
   border: '1px solid #475569',

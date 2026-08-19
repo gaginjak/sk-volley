@@ -10,15 +10,17 @@ import { LoginScreen } from './components/LoginScreen'
 import { MedicalAlerts } from './components/MedicalAlerts'
 import { PlayerDetailView } from './components/PlayerDetailView'
 import { StatisticsView } from './components/StatisticsView'
+import { TrainingAttendanceView } from './components/TrainingAttendanceView'
 import { supabase } from './supabaseClient'
 import { parseGroupIds, toLocalDateInput } from './utils'
 
-function createRouteState({ screen, selectedGroup = null, selectedPlayer = null, selectedCoach = null, returnTarget = 'groups', calendarSelectedDate }) {
+function createRouteState({ screen, selectedGroup = null, selectedPlayer = null, selectedCoach = null, selectedTraining = null, returnTarget = 'groups', calendarSelectedDate }) {
   return {
     screen,
     selectedGroup,
     selectedPlayer,
     selectedCoach,
+    selectedTraining,
     returnTarget,
     calendarSelectedDate,
   }
@@ -33,15 +35,17 @@ function App() {
   const [selectedGroup, setSelectedGroup] = useState(null)
   const [selectedPlayer, setSelectedPlayer] = useState(null)
   const [selectedCoach, setSelectedCoach] = useState(null)
+  const [selectedTraining, setSelectedTraining] = useState(null)
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => toLocalDateInput(new Date()))
   const [returnTarget, setReturnTarget] = useState('groups')
 
-  function applyRouteState(routeState, method = 'replace') {
+  function applyRouteState(routeState, method = null) {
     const nextState = createRouteState({
       screen: routeState.screen || 'calendar',
       selectedGroup: routeState.selectedGroup || null,
       selectedPlayer: routeState.selectedPlayer || null,
       selectedCoach: routeState.selectedCoach || null,
+      selectedTraining: routeState.selectedTraining || null,
       returnTarget: routeState.returnTarget || 'groups',
       calendarSelectedDate: routeState.calendarSelectedDate || toLocalDateInput(new Date()),
     })
@@ -50,12 +54,13 @@ function App() {
     setSelectedGroup(nextState.selectedGroup)
     setSelectedPlayer(nextState.selectedPlayer)
     setSelectedCoach(nextState.selectedCoach)
+    setSelectedTraining(nextState.selectedTraining)
     setReturnTarget(nextState.returnTarget)
     setCalendarSelectedDate(nextState.calendarSelectedDate)
 
     if (method === 'push') {
       window.history.pushState(nextState, '')
-    } else {
+    } else if (method === 'replace') {
       window.history.replaceState(nextState, '')
     }
   }
@@ -103,7 +108,7 @@ function App() {
 
     const handlePopState = (event) => {
       const state = event.state || createRouteState({ screen: 'calendar', calendarSelectedDate })
-      applyRouteState(state, 'replace')
+      applyRouteState(state)
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -122,6 +127,7 @@ function App() {
     setSelectedGroup(null)
     setSelectedPlayer(null)
     setSelectedCoach(null)
+    setSelectedTraining(null)
   }
 
   function handleOpenGroup(group, fromScreen = 'groups') {
@@ -139,13 +145,14 @@ function App() {
   function handleOpenTraining(training) {
     if (!training?.gid) return
     navigate(createRouteState({
-      screen: 'group-detail',
+      screen: 'training-attendance',
       selectedGroup: {
         id: training.gid,
         name: training.gname || 'Grupa',
         uzrast: training.uzrast || '',
         pol: '',
       },
+      selectedTraining: training,
       returnTarget: 'calendar',
       calendarSelectedDate: training.date || calendarSelectedDate,
     }))
@@ -153,6 +160,13 @@ function App() {
 
   function handleBack() {
     window.history.back()
+  }
+
+  function handleCalendarDateChange(date) {
+    setCalendarSelectedDate(date)
+    if (window.history.state) {
+      window.history.replaceState({ ...window.history.state, calendarSelectedDate: date }, '')
+    }
   }
 
   if (!session) {
@@ -163,9 +177,10 @@ function App() {
     <div style={{ minHeight: '100vh', background: '#0f172a', color: '#e2e8f0' }}>
       <Header user={session} onLogout={handleLogout} />
       <MedicalAlerts user={session} />
-      {screen === 'calendar' ? <CalendarView user={session} selectedDate={calendarSelectedDate} onDateChange={setCalendarSelectedDate} onOpenTraining={handleOpenTraining} /> : null}
+      {screen === 'calendar' ? <CalendarView user={session} selectedDate={calendarSelectedDate} onDateChange={handleCalendarDateChange} onOpenTraining={handleOpenTraining} /> : null}
       {screen === 'groups' ? <GroupsView user={session} onOpenGroup={handleOpenGroup} onOpenPlayer={handleOpenPlayer} /> : null}
       {screen === 'group-detail' && selectedGroup ? <GroupDetailView group={selectedGroup} user={session} initialDate={calendarSelectedDate} onBack={handleBack} onOpenPlayer={handleOpenPlayer} /> : null}
+      {screen === 'training-attendance' && selectedTraining ? <TrainingAttendanceView training={selectedTraining} group={selectedGroup} onBack={handleBack} /> : null}
       {screen === 'player-detail' && selectedPlayer ? <PlayerDetailView player={selectedPlayer} user={session} onBack={handleBack} /> : null}
       {screen === 'statistics' ? <StatisticsView user={session} onOpenGroup={handleOpenGroup} onOpenPlayer={handleOpenPlayer} onOpenCoach={handleOpenCoach} /> : null}
       {screen === 'coach-detail' && selectedCoach ? <CoachDetailView coach={selectedCoach} user={session} onBack={handleBack} onOpenGroup={handleOpenGroup} /> : null}
@@ -175,10 +190,11 @@ function App() {
           selectedGroup: null,
           selectedPlayer: null,
           selectedCoach: null,
+          selectedTraining: null,
           returnTarget: next === 'calendar' ? 'groups' : returnTarget,
           calendarSelectedDate,
         })
-        navigate(nextState)
+        if (next !== screen) navigate(nextState)
       }} />
     </div>
   )

@@ -326,6 +326,19 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     })
 
     const medicalWarnings = visiblePlayers.map((player) => ({ ...player, status: getMedicalStatus(player.medical_expiry_date || player.medical) })).filter((player) => player.status !== 'ok')
+    const absenceWarnings = visiblePlayers.map((player) => {
+      const records = attendance
+        .filter((item) => String(item.player_id) === String(player.id) && String(item.group_id) === String(player.gid))
+        .sort((a, b) => String(b.training_date || '').localeCompare(String(a.training_date || '')))
+      let consecutiveAbsences = 0
+      for (const record of records) {
+        if (record.status !== 'absent') break
+        consecutiveAbsences += 1
+      }
+      if (consecutiveAbsences < 3) return null
+      const group = visibleGroups.find((item) => String(item.id) === String(player.gid))
+      return { ...player, groupName: group?.name || 'Grupa', consecutiveAbsences }
+    }).filter(Boolean)
 
     const unpaidByGroup = new Map()
     for (const entry of unpaidMemberships) {
@@ -372,6 +385,7 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
 
     return {
       medicalWarnings,
+      absenceWarnings,
       currentMonth,
       unpaidMemberships,
       unpaidGroups,
@@ -502,6 +516,12 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   return (
     <div style={{ padding: 16, display: 'grid', gap: 12 }}>
       <div style={{ color: '#ff9800', fontSize: 22, fontWeight: 800 }}>Statistika</div>
+      {stats.absenceWarnings.length ? (
+        <div style={{ background: '#3f1d1d', border: '1px solid #ef4444', borderRadius: 12, padding: 14, display: 'grid', gap: 8 }}>
+          <div style={{ color: '#fecaca', fontWeight: 700 }}>Obaveštenja o prisustvu</div>
+          {stats.absenceWarnings.map((warning) => <div key={warning.id} style={{ color: '#fef2f2', fontSize: 14 }}>Proveri sa roditeljima: {warning.name} - {warning.consecutiveAbsences} uzastopna propuštena treninga ({warning.groupName})</div>)}
+        </div>
+      ) : null}
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>1. Ukupno naplaćene članarine</div>
         <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>Mesec: {stats.currentMonth}</div>
