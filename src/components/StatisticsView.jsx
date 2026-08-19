@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../supabaseClient'
-import { getCurrentMonthKey, getMedicalLabel, getMedicalStatus, getMemberIdentityFromPayment, getMemberIdentityFromPlayer, isAdminRole, parseGroupIds, parsePayments } from '../utils'
+import { getCurrentMonthKey, getMemberIdentityFromPayment, getMemberIdentityFromPlayer, isAdminRole, parseGroupIds, parsePayments } from '../utils'
 
 function toNumber(value) {
   if (typeof value === 'number') return value
@@ -325,21 +325,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       }
     })
 
-    const medicalWarnings = visiblePlayers.map((player) => ({ ...player, status: getMedicalStatus(player.medical_expiry_date || player.medical) })).filter((player) => player.status !== 'ok')
-    const absenceWarnings = visiblePlayers.map((player) => {
-      const records = attendance
-        .filter((item) => String(item.player_id) === String(player.id) && String(item.group_id) === String(player.gid))
-        .sort((a, b) => String(b.training_date || '').localeCompare(String(a.training_date || '')))
-      let consecutiveAbsences = 0
-      for (const record of records) {
-        if (record.status !== 'absent') break
-        consecutiveAbsences += 1
-      }
-      if (consecutiveAbsences < 3) return null
-      const group = visibleGroups.find((item) => String(item.id) === String(player.gid))
-      return { ...player, groupName: group?.name || 'Grupa', consecutiveAbsences }
-    }).filter(Boolean)
-
     const unpaidByGroup = new Map()
     for (const entry of unpaidMemberships) {
       const sortedGroupIds = Array.from(entry.groups).sort((a, b) => {
@@ -384,8 +369,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     }
 
     return {
-      medicalWarnings,
-      absenceWarnings,
       currentMonth,
       unpaidMemberships,
       unpaidGroups,
@@ -516,12 +499,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
   return (
     <div style={{ padding: 16, display: 'grid', gap: 12 }}>
       <div style={{ color: '#ff9800', fontSize: 22, fontWeight: 800 }}>Statistika</div>
-      {stats.absenceWarnings.length ? (
-        <div style={{ background: '#3f1d1d', border: '1px solid #ef4444', borderRadius: 12, padding: 14, display: 'grid', gap: 8 }}>
-          <div style={{ color: '#fecaca', fontWeight: 700 }}>Obaveštenja o prisustvu</div>
-          {stats.absenceWarnings.map((warning) => <div key={warning.id} style={{ color: '#fef2f2', fontSize: 14 }}>Proveri sa roditeljima: {warning.name} - {warning.consecutiveAbsences} uzastopna propuštena treninga ({warning.groupName})</div>)}
-        </div>
-      ) : null}
       <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
         <div style={{ fontWeight: 700, color: '#f8fafc' }}>1. Ukupno naplaćene članarine</div>
         <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>Mesec: {stats.currentMonth}</div>
@@ -554,13 +531,6 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
             <div style={{ color: '#cbd5e1', fontSize: 12 }}>Plaćeno: {item.paidCount} • Neplaćeno: {item.unpaidCount}</div>
             <div style={{ color: '#ff9800', fontWeight: 700, marginTop: 4 }}>{item.total.toLocaleString('sr-RS')} RSD</div>
           </div>
-        ))}
-      </div>
-
-      <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-        <div style={{ fontWeight: 700, color: '#f8fafc' }}>Medicinska upozorenja</div>
-        {stats.medicalWarnings.length === 0 ? <div style={{ color: '#94a3b8', marginTop: 8 }}>Nema upozorenja.</div> : stats.medicalWarnings.map((player) => (
-          <button key={player.id} onClick={() => onOpenPlayer?.(player, 'statistics')} style={{ border: 'none', background: 'transparent', color: player.status === 'expired' ? '#fca5a5' : '#fde68a', marginTop: 8, fontWeight: 700, textAlign: 'left', cursor: 'pointer', padding: 0 }}>{player.name} • {getMedicalLabel(player.status)}</button>
         ))}
       </div>
 

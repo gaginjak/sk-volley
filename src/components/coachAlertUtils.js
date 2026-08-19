@@ -1,7 +1,3 @@
-export function getReadKey(userId, alertType) {
-  return `sk-volley-alert-read:${userId}:${alertType}`
-}
-
 export function getAttendanceWarnings(players, groups, attendance) {
   return players.map((player) => {
     const records = attendance

@@ -1,9 +1,9 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatDate, getMedicalLabel, getMedicalStatus, isAdminRole } from '../utils'
-import { getAttendanceWarnings, getReadKey } from './coachAlertUtils'
+import { getAttendanceWarnings } from './coachAlertUtils'
 
-export function CoachAlertListView({ user, alertType, onBack }) {
+export function CoachAlertListView({ user, alertType, onBack, onMarkRead }) {
   const [groups, setGroups] = useState([])
   const [players, setPlayers] = useState([])
   const [attendance, setAttendance] = useState([])
@@ -32,13 +32,10 @@ export function CoachAlertListView({ user, alertType, onBack }) {
     return players.map((player) => ({ player, group: groups.find((item) => String(item.id) === String(player.gid)), status: getMedicalStatus(player.medical_expiry_date || player.medical) }))
       .filter((item) => item.status !== 'ok')
   }, [alertType, attendance, groups, players])
-  const signature = alertType === 'attendance'
-    ? warnings.map((item) => `${item.player.id}:${item.missedDates.join(',')}`).join('|')
-    : warnings.map((item) => `${item.player.id}:${item.player.medical_expiry_date || item.player.medical}`).join('|')
-
   function markAsRead() {
-    localStorage.setItem(getReadKey(user?.id, alertType), `${warnings.length}:${signature}`)
+    onMarkRead?.(alertType)
     setMarkedRead(true)
+    onBack()
   }
 
   const title = alertType === 'attendance'

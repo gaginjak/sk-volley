@@ -1,9 +1,9 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { getMedicalStatus, isAdminRole } from '../utils'
-import { getAttendanceWarnings, getReadKey } from './coachAlertUtils'
+import { getAttendanceWarnings } from './coachAlertUtils'
 
-export function CoachDashboardAlerts({ user, onOpenAlert }) {
+export function CoachDashboardAlerts({ user, dismissedAlerts, onOpenAlert }) {
   const [groups, setGroups] = useState([])
   const [players, setPlayers] = useState([])
   const [attendance, setAttendance] = useState([])
@@ -48,13 +48,12 @@ export function CoachDashboardAlerts({ user, onOpenAlert }) {
     <section style={{ margin: 16, display: 'grid', gap: 10 }}>
       <div style={{ color: '#f8fafc', fontWeight: 800, fontSize: 18 }}>Obaveštenja</div>
       {cards.map((card) => {
-        const readSignature = `${card.count}:${card.type === 'attendance' ? alerts.attendance.map((item) => `${item.player.id}:${item.missedDates.join(',')}`).join('|') : alerts.medical.map((player) => `${player.id}:${player.medical_expiry_date || player.medical}`).join('|')}`
-        const isRead = localStorage.getItem(getReadKey(user?.id, card.type)) === readSignature
         const hasIssues = card.count > 0
+        if (hasIssues && dismissedAlerts.includes(card.type)) return null
         return (
-          <button key={card.type} type="button" onClick={() => onOpenAlert?.(card.type)} style={{ display: 'grid', gap: 5, textAlign: 'left', border: hasIssues && !isRead ? '1px solid #ef4444' : '1px solid #334155', borderRadius: 12, padding: 14, background: '#111827', color: '#f8fafc', cursor: 'pointer' }}>
+          <button key={card.type} type="button" onClick={() => onOpenAlert?.(card.type)} style={{ display: 'grid', gap: 5, textAlign: 'left', border: hasIssues ? '1px solid #ef4444' : '1px solid #334155', borderRadius: 12, padding: 14, background: '#111827', color: '#f8fafc', cursor: 'pointer' }}>
             <span style={{ fontWeight: 800 }}>{card.title}</span>
-            <span style={{ color: hasIssues ? '#fecaca' : '#94a3b8', fontSize: 13 }}>{hasIssues ? `${card.count} ${card.type === 'attendance' ? 'igrača zahteva proveru.' : 'igrača zahteva pažnju.'}` : 'Nema problema.'}{hasIssues && isRead ? ' Pregledano.' : ''}</span>
+            <span style={{ color: hasIssues ? '#fecaca' : '#94a3b8', fontSize: 13 }}>{hasIssues ? `${card.count} ${card.type === 'attendance' ? 'igrača zahteva proveru.' : 'igrača zahteva pažnju.'}` : 'Nema problema.'}</span>
           </button>
         )
       })}

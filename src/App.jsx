@@ -39,6 +39,7 @@ function App() {
   const [selectedCoach, setSelectedCoach] = useState(null)
   const [selectedTraining, setSelectedTraining] = useState(null)
   const [alertType, setAlertType] = useState(null)
+  const [dismissedAlerts, setDismissedAlerts] = useState([])
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => toLocalDateInput(new Date()))
   const [returnTarget, setReturnTarget] = useState('groups')
 
@@ -122,6 +123,7 @@ function App() {
 
   function handleLogin(user) {
     setSession(user)
+    setDismissedAlerts([])
     applyRouteState(createRouteState({ screen: 'calendar', calendarSelectedDate }), 'replace')
   }
 
@@ -134,6 +136,7 @@ function App() {
     setSelectedCoach(null)
     setSelectedTraining(null)
     setAlertType(null)
+    setDismissedAlerts([])
   }
 
   function handleOpenGroup(group, fromScreen = 'groups') {
@@ -191,12 +194,12 @@ function App() {
   return (
     <div style={{ minHeight: '100vh', background: '#0f172a', color: '#e2e8f0' }}>
       <Header user={session} onLogout={handleLogout} />
-      {screen === 'calendar' ? <CoachDashboardAlerts user={session} onOpenAlert={handleOpenAlert} /> : null}
+      {screen === 'calendar' ? <CoachDashboardAlerts user={session} dismissedAlerts={dismissedAlerts} onOpenAlert={handleOpenAlert} /> : null}
       {screen === 'calendar' ? <CalendarView user={session} selectedDate={calendarSelectedDate} onDateChange={handleCalendarDateChange} onOpenTraining={handleOpenTraining} /> : null}
       {screen === 'groups' ? <GroupsView user={session} onOpenGroup={handleOpenGroup} onOpenPlayer={handleOpenPlayer} /> : null}
       {screen === 'group-detail' && selectedGroup ? <GroupDetailView group={selectedGroup} user={session} initialDate={calendarSelectedDate} onBack={handleBack} onOpenPlayer={handleOpenPlayer} /> : null}
       {screen === 'training-attendance' && selectedTraining ? <TrainingAttendanceView training={selectedTraining} group={selectedGroup} onBack={handleBack} /> : null}
-      {screen === 'coach-alerts' && alertType ? <CoachAlertListView user={session} alertType={alertType} onBack={handleBack} /> : null}
+      {screen === 'coach-alerts' && alertType ? <CoachAlertListView user={session} alertType={alertType} onBack={handleBack} onMarkRead={(type) => setDismissedAlerts((current) => current.includes(type) ? current : [...current, type])} /> : null}
       {screen === 'player-detail' && selectedPlayer ? <PlayerDetailView player={selectedPlayer} user={session} onBack={handleBack} /> : null}
       {screen === 'statistics' ? <StatisticsView user={session} onOpenGroup={handleOpenGroup} onOpenPlayer={handleOpenPlayer} onOpenCoach={handleOpenCoach} /> : null}
       {screen === 'coach-detail' && selectedCoach ? <CoachDetailView coach={selectedCoach} user={session} onBack={handleBack} onOpenGroup={handleOpenGroup} /> : null}
