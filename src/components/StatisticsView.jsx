@@ -78,6 +78,7 @@ function isPaymentTypeMatch(payment, selectedType) {
 export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach }) {
   const [groups, setGroups] = useState([])
   const [players, setPlayers] = useState([])
+  const [attendance, setAttendance] = useState([])
   const [users, setUsers] = useState([])
   const [coachFormOpen, setCoachFormOpen] = useState(false)
   const [coachForm, setCoachForm] = useState({ name: '', username: '', password: '', group_ids: [] })
@@ -99,21 +100,28 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
     const usersChannel = supabase.channel('statistics-users')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, loadData)
       .subscribe()
+    const attendanceChannel = supabase.channel('statistics-attendance')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, loadData)
+      .subscribe()
+
     return () => {
       supabase.removeChannel(playersChannel)
       supabase.removeChannel(groupsChannel)
       supabase.removeChannel(usersChannel)
+      supabase.removeChannel(attendanceChannel)
     }
   }, [user?.id, user?.role, user?.group_ids])
 
   async function loadData() {
-    const [groupsRes, playersRes, usersRes] = await Promise.all([
+    const [groupsRes, playersRes, attendanceRes, usersRes] = await Promise.all([
       supabase.from('groups').select('*').order('name'),
       supabase.from('players').select('*').order('name'),
+      supabase.from('attendance').select('*'),
       supabase.from('users').select('*').order('name'),
     ])
     setGroups(groupsRes.data || [])
     setPlayers(playersRes.data || [])
+    setAttendance(attendanceRes.data || [])
     setUsers(usersRes.data || [])
   }
 
@@ -369,8 +377,21 @@ export function StatisticsView({ user, onOpenGroup, onOpenPlayer, onOpenCoach })
       collectedPerGroup,
       coachStats,
       clubTotal: Math.round(clubTotal * 100) / 100,
+      groupStats: visibleGroups.map((group) => {
+        const groupPlayers = visiblePlayers.filter((player) => String(player.gid) === String(group.id))
+        const groupAttendance = attendance.filter((item) => String(item.group_id) === String(group.id))
+        const present = groupAttendance.filter((item) => item.status === 'present').length
+        const total = groupAttendance.length
+        return {
+          ...group,
+          present,
+          total,
+          percent: total ? Math.round((present / total) * 100) : 0,
+          playerCount: groupPlayers.length,
+        }
+      }),
     }
-  }, [groups, visibleGroups, visiblePlayers])
+  }, [attendance, groups, visibleGroups, visiblePlayers])
 
   function handleExport() {
     if (exportConfig.exportType === 'group') {

@@ -5,7 +5,7 @@ export function getAttendanceWarnings(players, groups, attendance) {
       .sort((a, b) => String(b.training_date || '').localeCompare(String(a.training_date || '')))
     const missedDates = []
     for (const record of records) {
-      if (record.status !== 'absent' && record.status !== 'a') break
+      if (record.status !== 'absent') break
       missedDates.push(record.training_date)
     }
     if (missedDates.length < 3) return null
