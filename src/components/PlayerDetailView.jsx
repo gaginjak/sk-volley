@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
+import { PlayerAttendance } from './PlayerAttendance'
 import { calculateMedicalExpiry, formatDate, getCurrentMonthKey, getMedicalLabel, getMedicalStatus, getMemberIdentityFromPayment, getMemberIdentityFromPlayer, parsePayments, stringifyPayments } from '../utils'
 
 function formatMonthLabel(value) {
@@ -42,7 +43,6 @@ export function PlayerDetailView({ player, user, onBack }) {
   const [activeTab, setActiveTab] = useState('info')
   const [playerState, setPlayerState] = useState(player)
   const [payments, setPayments] = useState([])
-  const [attendance, setAttendance] = useState([])
   const [form, setForm] = useState({ amount: '', date: '', payment_type: 'Članarina', currency: 'RSD', paid: false })
   const [feedback, setFeedback] = useState('')
   const [editing, setEditing] = useState(false)
@@ -55,15 +55,11 @@ export function PlayerDetailView({ player, user, onBack }) {
   }, [player])
 
   async function loadData(targetPlayer = player) {
-    const [playersRes, attendanceRes] = await Promise.all([
-      supabase.from('players').select('*').eq('id', targetPlayer.id).single(),
-      supabase.from('attendance').select('*').eq('player_id', targetPlayer.id).order('training_date'),
-    ])
+    const playersRes = await supabase.from('players').select('*').eq('id', targetPlayer.id).single()
     const currentPlayer = playersRes.data || targetPlayer
     setPlayerState(currentPlayer)
     const nextPayments = await loadMemberPayments(currentPlayer)
     setPayments(nextPayments)
-    setAttendance(attendanceRes.data || [])
   }
 
   async function loadMemberPayments(currentPlayer) {
@@ -207,14 +203,6 @@ export function PlayerDetailView({ player, user, onBack }) {
     }
   }
 
-  const stats = useMemo(() => {
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    const monthItems = attendance.filter((item) => item.training_date?.startsWith(currentMonth))
-    const fullSeason = attendance.length ? Math.round((attendance.filter((item) => item.status === 'present').length / attendance.length) * 100) : 0
-    const monthPct = monthItems.length ? Math.round((monthItems.filter((item) => item.status === 'present').length / monthItems.length) * 100) : 0
-    return { fullSeason, monthPct }
-  }, [attendance])
-
   const medicalStatus = getMedicalStatus(playerState?.medical_expiry_date || playerState?.medical)
   const recentPayments = useMemo(() => [...payments].slice(-3).reverse(), [payments])
   const canEditPlayer = user?.role === 'admin' || user?.role === 'Administrator' || user?.role === 'superadmin' || user?.role === 'trener' || user?.role === 'coach' || user?.role === 'Coach'
@@ -322,12 +310,7 @@ export function PlayerDetailView({ player, user, onBack }) {
       ) : null}
 
       {activeTab === 'attendance' ? (
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ background: '#111827', borderRadius: 16, padding: 14 }}>
-            <div style={{ color: '#f8fafc', fontWeight: 700 }}>Prisustvo</div>
-            <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 4 }}>Mesec: {stats.monthPct}% • Sezona: {stats.fullSeason}%</div>
-          </div>
-        </div>
+        <PlayerAttendance playerId={player?.id} />
       ) : null}
     </div>
   )

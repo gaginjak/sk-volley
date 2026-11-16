@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../supabaseClient'
+import { fetchGroupAttendance, getPlayerAttendance } from '../attendanceUtils'
 import { calculateMedicalExpiry, formatDate, getCurrentMonthKey, getMedicalLabel, getMedicalStatus, parsePayments } from '../utils'
 
 export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer }) {
   const [activeTab, setActiveTab] = useState('players')
   const [players, setPlayers] = useState([])
-  const [trainings, setTrainings] = useState([])
   const [attendance, setAttendance] = useState([])
   const [showAddForm, setShowAddForm] = useState(false)
   const [coachOptions, setCoachOptions] = useState([])
@@ -42,14 +42,14 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
 
   async function loadData() {
     if (!group?.id) return
-    const [playersRes, trainingsRes, attendanceRes] = await Promise.all([
+    const [playersRes, attendanceRes] = await Promise.all([
       supabase.from('players').select('*').eq('gid', group.id).order('name'),
-      supabase.from('trainings').select('*').eq('gid', group.id).order('date'),
-      supabase.from('attendance').select('*').eq('group_id', group.id),
+      fetchGroupAttendance(supabase, group.id),
     ])
     setPlayers(playersRes.data || [])
-    setTrainings(trainingsRes.data || [])
     setAttendance(attendanceRes.data || [])
+    console.log('Attendance data fetched for group:', { groupId: group.id, records: attendanceRes.data, error: attendanceRes.error })
+    if (attendanceRes.error) setFeedback('Nije uspelo učitavanje prisustva.')
   }
 
   async function loadCoachOptions() {
@@ -158,22 +158,12 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
   }
 
   function getMonthDates(monthKey) {
-    return trainings
-      .filter((item) => String(item.date || '').startsWith(monthKey))
-      .map((item) => item.date)
-      .filter(Boolean)
-      .sort()
-      .filter((date, index, array) => array.indexOf(date) === index)
+    return getPlayerAttendance(attendance, group?.id, null, monthKey).dates
   }
 
   function getPlayerMonthRecord(player, monthKey) {
-    const monthDates = getMonthDates(monthKey)
-    const playerAttendance = attendance.filter((item) => item.player_id === player.id && String(item.training_date || '').startsWith(monthKey))
-    const byDate = new Map(playerAttendance.map((item) => [item.training_date, item.status]))
-    const presentCount = monthDates.filter((date) => byDate.get(date) === 'present').length
-    const absentCount = monthDates.filter((date) => byDate.get(date) === 'absent').length
-    const percentage = monthDates.length ? Math.round((presentCount / monthDates.length) * 100) : 0
-    return { monthDates, byDate, presentCount, absentCount, percentage }
+    const record = getPlayerAttendance(attendance, group?.id, player.id, monthKey)
+    return { ...record, monthDates: record.dates }
   }
 
   function exportMonthlyAttendance() {
@@ -185,7 +175,7 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
       }
       monthDates.forEach((date) => {
         const status = record.byDate.get(date)
-        row[formatDate(date)] = status === 'present' ? '✓' : status === 'absent' ? '✕' : ''
+        row[formatDate(date)] = status === 'p' ? '✓' : ['absent', 'a'].includes(status) ? '✕' : ''
       })
       row['Prisutno'] = record.presentCount
       row['Odsutno'] = record.absentCount
@@ -201,21 +191,29 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
   }
 
   const stats = useMemo(() => {
-    const currentMonth = statsMonth
     return players.map((player) => {
-      const playerAttendance = attendance.filter((item) => item.player_id === player.id)
-      const month = playerAttendance.filter((item) => item.training_date?.startsWith(currentMonth))
+      const allTime = getPlayerAttendance(attendance, group?.id, player.id)
+      const month = getPlayerAttendance(attendance, group?.id, player.id, statsMonth)
       return {
         ...player,
-        attendancePct: playerAttendance.length ? Math.round((playerAttendance.filter((item) => item.status === 'present').length / playerAttendance.length) * 100) : 0,
-        monthPct: month.length ? Math.round((month.filter((item) => item.status === 'present').length / month.length) * 100) : 0,
+        attendancePct: allTime.percentage,
+        monthPct: month.percentage,
         medicalStatus: getMedicalStatus(player.medical_expiry_date || player.medical),
       }
     }).sort((a, b) => b.attendancePct - a.attendancePct)
-  }, [attendance, players, statsMonth])
+  }, [attendance, group?.id, players, statsMonth])
 
   const selectedStatsPlayer = players.find((player) => player.id === selectedStatsPlayerId) || null
   const selectedStatsRecord = selectedStatsPlayer ? getPlayerMonthRecord(selectedStatsPlayer, statsMonth) : null
+  useEffect(() => {
+    if (!selectedStatsPlayer) return
+    console.log('Attendance data for player and group:', {
+      groupId: group?.id,
+      playerId: selectedStatsPlayer.id,
+      records: attendance.filter((item) => String(item.group_id) === String(group?.id) && String(item.player_id) === String(selectedStatsPlayer.id)),
+      groupRecords: attendance,
+    })
+  }, [attendance, group?.id, selectedStatsPlayer])
   const currentMonth = getCurrentMonthKey()
   const paymentStatuses = players.map((player) => ({
     ...player,
@@ -336,7 +334,7 @@ export function GroupDetailView({ group, user, initialDate, onBack, onOpenPlayer
               <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
                 {selectedStatsRecord.monthDates.map((date) => {
                   const status = selectedStatsRecord.byDate.get(date)
-                  const label = status === 'present' ? 'present' : status === 'absent' ? 'absent' : 'no record'
+                  const label = status === 'p' ? 'present' : ['absent', 'a'].includes(status) ? 'absent' : status == null ? 'no record' : String(status)
                   return <div key={date} style={{ color: '#cbd5e1', fontSize: 13 }}>{formatDate(date)} • {label}</div>
                 })}
                 {selectedStatsRecord.monthDates.length === 0 ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Nema treninga za izabrani mesec.</div> : null}
